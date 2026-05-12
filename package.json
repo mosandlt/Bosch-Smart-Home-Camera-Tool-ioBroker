@@ -9,6 +9,7 @@
   "homepage": "https://github.com/mosandlt/ioBroker.bosch-smart-home-camera",
   "license": "MIT",
   "keywords": [
+    "ioBroker",
     "iobroker",
     "adapter",
     "bosch",

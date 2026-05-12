@@ -15,9 +15,8 @@ yarn-error.log*
 *.tgz
 yarn.lock
 
-# Build / dist
-build/
-dist/
+# Build / dist (committed for ioBroker adapter — do not re-add build/ here)
+# build/ is intentionally committed (E124: repochecker needs build/main.js on GitHub)
 *.tsbuildinfo
 
 # Adapter-local config (real credentials never committed)

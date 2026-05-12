@@ -5,25 +5,53 @@
     "news": {
       "0.1.0": {
         "en": "Initial scaffolding — skeleton only, no functionality yet",
-        "de": "Erstes Gerüst — nur Skeleton, noch keine Funktionalität"
+        "de": "Erstes Gerüst — nur Skeleton, noch keine Funktionalität",
+        "ru": "Начальный каркас — только скелет, функциональность ещё не реализована",
+        "pt": "Estrutura inicial — apenas esqueleto, sem funcionalidade ainda",
+        "nl": "Eerste opzet — alleen skelet, nog geen functionaliteit",
+        "fr": "Structure initiale — squelette uniquement, aucune fonctionnalité pour l'instant",
+        "it": "Scaffolding iniziale — solo scheletro, nessuna funzionalità ancora",
+        "es": "Estructura inicial — solo esqueleto, sin funcionalidad todavía",
+        "pl": "Początkowa struktura — tylko szkielet, brak funkcjonalności",
+        "uk": "Початкова структура — лише каркас, функціональність ще не реалізована",
+        "zh-cn": "初始骨架——仅框架，暂无功能"
       }
     },
-    "title": "Bosch Smart Home Camera",
     "titleLang": {
       "en": "Bosch Smart Home Camera",
-      "de": "Bosch Smart Home Kamera"
+      "de": "Bosch Smart Home Kamera",
+      "ru": "Камера Bosch Smart Home",
+      "pt": "Câmera Bosch Smart Home",
+      "nl": "Bosch Smart Home Camera",
+      "fr": "Caméra Bosch Smart Home",
+      "it": "Telecamera Bosch Smart Home",
+      "es": "Cámara Bosch Smart Home",
+      "pl": "Kamera Bosch Smart Home",
+      "uk": "Камера Bosch Smart Home",
+      "zh-cn": "博世智能家居摄像头"
     },
     "desc": {
       "en": "Bosch Smart Home Camera (Eyes/360/Gen2) cloud-API integration",
-      "de": "Bosch Smart Home Kamera (Eyes/360/Gen2) Cloud-API-Integration"
+      "de": "Bosch Smart Home Kamera (Eyes/360/Gen2) Cloud-API-Integration",
+      "ru": "Интеграция облачного API камеры Bosch Smart Home (Eyes/360/Gen2)",
+      "pt": "Integração de API em nuvem da câmera Bosch Smart Home (Eyes/360/Gen2)",
+      "nl": "Bosch Smart Home Camera (Eyes/360/Gen2) cloud-API integratie",
+      "fr": "Intégration API cloud de la caméra Bosch Smart Home (Eyes/360/Gen2)",
+      "it": "Integrazione API cloud della telecamera Bosch Smart Home (Eyes/360/Gen2)",
+      "es": "Integración de API en la nube de la cámara Bosch Smart Home (Eyes/360/Gen2)",
+      "pl": "Integracja API chmury kamery Bosch Smart Home (Eyes/360/Gen2)",
+      "uk": "Інтеграція хмарного API камери Bosch Smart Home (Eyes/360/Gen2)",
+      "zh-cn": "博世智能家居摄像头（Eyes/360/Gen2）云API集成"
     },
     "authors": [
       "mosandlt <10558666+mosandlt@users.noreply.github.com>"
     ],
-    "keywords": ["bosch", "smart home", "camera", "eyes", "gen2", "cloud"],
-    "license": "MIT",
+    "keywords": ["bosch", "camera", "eyes", "smart-home", "rtsp", "fcm", "cloud"],
+    "licenseInformation": {
+      "type": "free",
+      "license": "MIT"
+    },
     "platform": "Javascript/Node.js",
-    "main": "build/main.js",
     "icon": "bosch-camera.png",
     "enabled": true,
     "extIcon": "https://raw.githubusercontent.com/mosandlt/ioBroker.bosch-smart-home-camera/main/admin/bosch-camera.png",
@@ -33,11 +61,16 @@
     "type": "multimedia",
     "connectionType": "cloud",
     "dataSource": "push",
-    "materialize": true,
+    "tier": 3,
     "compact": true,
     "adminUI": {
       "config": "json"
-    }
+    },
+    "dependencies": [
+      {
+        "js-controller": ">=5.0.19"
+      }
+    ]
   },
   "native": {},
   "instanceObjects": [],
