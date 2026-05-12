@@ -1,0 +1,45 @@
+{
+  "common": {
+    "name": "bosch-smart-home-camera",
+    "version": "0.1.0",
+    "news": {
+      "0.1.0": {
+        "en": "Initial scaffolding — skeleton only, no functionality yet",
+        "de": "Erstes Gerüst — nur Skeleton, noch keine Funktionalität"
+      }
+    },
+    "title": "Bosch Smart Home Camera",
+    "titleLang": {
+      "en": "Bosch Smart Home Camera",
+      "de": "Bosch Smart Home Kamera"
+    },
+    "desc": {
+      "en": "Bosch Smart Home Camera (Eyes/360/Gen2) cloud-API integration",
+      "de": "Bosch Smart Home Kamera (Eyes/360/Gen2) Cloud-API-Integration"
+    },
+    "authors": [
+      "mosandlt <10558666+mosandlt@users.noreply.github.com>"
+    ],
+    "keywords": ["bosch", "smart home", "camera", "eyes", "gen2", "cloud"],
+    "license": "MIT",
+    "platform": "Javascript/Node.js",
+    "main": "build/main.js",
+    "icon": "bosch-camera.png",
+    "enabled": true,
+    "extIcon": "https://raw.githubusercontent.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker/main/admin/bosch-camera.png",
+    "readme": "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker#readme",
+    "loglevel": "info",
+    "mode": "daemon",
+    "type": "multimedia",
+    "connectionType": "cloud",
+    "dataSource": "push",
+    "materialize": true,
+    "compact": true,
+    "adminUI": {
+      "config": "json"
+    }
+  },
+  "native": {},
+  "instanceObjects": [],
+  "objects": []
+}

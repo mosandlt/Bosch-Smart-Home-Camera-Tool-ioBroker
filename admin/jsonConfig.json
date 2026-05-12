@@ -1,0 +1,37 @@
+{
+  "type": "tabs",
+  "items": {
+    "tab_connection": {
+      "type": "tab",
+      "label": "Connection",
+      "items": {
+        "username": {
+          "type": "text",
+          "label": "Bosch Account (Email)",
+          "help": "Your Bosch SingleKey ID email address",
+          "sm": 12,
+          "md": 6
+        },
+        "password": {
+          "type": "password",
+          "label": "Password",
+          "help": "Your Bosch SingleKey ID password",
+          "sm": 12,
+          "md": 6
+        },
+        "region": {
+          "type": "select",
+          "label": "Region",
+          "help": "Bosch cloud region (EU for Europe)",
+          "default": "EU",
+          "options": [
+            { "label": "Europe (EU)", "value": "EU" },
+            { "label": "United States (US)", "value": "US" }
+          ],
+          "sm": 12,
+          "md": 4
+        }
+      }
+    }
+  }
+}
