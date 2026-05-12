@@ -57,6 +57,24 @@ Implementation kicked off when AdapterRequests #1022 showed sufficient community
 - **[iobroker.cameras](https://github.com/ioBroker/ioBroker.cameras)** — generic HTTP snapshot / RTSP wrapper. v2.1.2 July 2024, TypeScript rewrite announced but not finished.
 - **[iobroker.onvif](https://github.com/iobroker-community-adapters/ioBroker.onvif)** — generic ONVIF cameras. Currently not usable for Bosch cameras (no ONVIF endpoint exposed).
 
+## Release process
+
+This adapter uses [`@alcalzone/release-script`](https://github.com/AlCalzone/release-script) for version bumps.
+
+```bash
+npm run release patch  # 0.0.1 → 0.0.2
+npm run release minor  # 0.0.1 → 0.1.0
+npm run release major  # 0.0.1 → 1.0.0
+```
+
+The script:
+1. Runs `npm run build && npm run test:js` (must pass)
+2. Bumps version in `package.json` + `io-package.json`
+3. Auto-generates a news entry from commits since last release
+4. Asks for manual review
+5. Creates git tag `vX.Y.Z` + pushes
+6. GitHub Actions auto-publishes to npm on tag push
+
 ## Related repos
 
 - HA Integration: [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) (v12.0.1, Quality Scale Platinum)
