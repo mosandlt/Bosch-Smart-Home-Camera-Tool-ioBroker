@@ -70,9 +70,90 @@
       {
         "js-controller": ">=5.0.19"
       }
-    ]
+    ],
+    "encryptedNative": ["password"],
+    "protectedNative": ["password"]
   },
   "native": {},
-  "instanceObjects": [],
+  "instanceObjects": [
+    {
+      "_id": "info",
+      "type": "channel",
+      "common": { "name": "Information" },
+      "native": {}
+    },
+    {
+      "_id": "info.connection",
+      "type": "state",
+      "common": {
+        "role": "indicator.connected",
+        "name": "Device or service connected",
+        "type": "boolean",
+        "read": true,
+        "write": false,
+        "def": false
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.access_token",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Current Bosch SingleKey ID access token (sensitive — DO NOT share)",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.refresh_token",
+      "type": "state",
+      "common": {
+        "role": "text",
+        "name": "Current Bosch SingleKey ID refresh token (sensitive — DO NOT share)",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": ""
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.token_expires_at",
+      "type": "state",
+      "common": {
+        "role": "value.time",
+        "name": "Access token expiration timestamp (epoch ms)",
+        "type": "number",
+        "read": true,
+        "write": false,
+        "def": 0
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.last_login_ago",
+      "type": "state",
+      "common": {
+        "role": "value.time",
+        "name": "Seconds since last successful login",
+        "type": "number",
+        "read": true,
+        "write": false,
+        "def": 0,
+        "unit": "s"
+      },
+      "native": {}
+    },
+    {
+      "_id": "cameras",
+      "type": "device",
+      "common": { "name": "Bosch cameras" },
+      "native": {}
+    }
+  ],
   "objects": []
 }
