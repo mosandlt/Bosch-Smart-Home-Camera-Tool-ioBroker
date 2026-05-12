@@ -15,7 +15,8 @@
  */
 
 import * as utils from "@iobroker/adapter-core";
-import "./lib/adapter-config"; // augment ioBroker.AdapterConfig with our typed settings
+// adapter-config.d.ts augments ioBroker.AdapterConfig — included via tsconfig src/**/*.ts,
+// no runtime import needed (import would fail: .d.ts files produce no .js output)
 
 import {
     refreshAccessToken,
@@ -227,6 +228,73 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 native: {},
             });
 
+            // Writable states — user commands
+            await this.setObjectNotExistsAsync(`${prefix}.privacy_enabled`, {
+                type: "state",
+                common: {
+                    name: "Privacy mode (camera dark)",
+                    role: "switch",
+                    type: "boolean",
+                    read: true,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.light_enabled`, {
+                type: "state",
+                common: {
+                    name: "Camera light",
+                    role: "switch.light",
+                    type: "boolean",
+                    read: true,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            // Indoor-only in practice — created for all cameras; can be filtered later by generation/hardwareVersion
+            await this.setObjectNotExistsAsync(`${prefix}.image_rotation_180`, {
+                type: "state",
+                common: {
+                    name: "Image rotated 180° (ceiling mount)",
+                    role: "switch",
+                    type: "boolean",
+                    read: true,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.snapshot_trigger`, {
+                type: "state",
+                common: {
+                    name: "Trigger snapshot refresh (write true to fetch new)",
+                    role: "button",
+                    type: "boolean",
+                    read: false,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.snapshot_path`, {
+                type: "state",
+                common: {
+                    name: "Path to last fetched snapshot JPEG (in adapter data folder)",
+                    role: "text.url",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
             // Set initial values
             await this.upsertState(`${prefix}.name`, cam.name);
             await this.upsertState(`${prefix}.firmware_version`, cam.firmwareVersion);
@@ -428,6 +496,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // ── Step 3: Create state tree ──────────────────────────────────────
         await this.ensureCameraObjects(cameras);
 
+        // Subscribe to all camera states so onStateChange receives user writes
+        await this.subscribeStatesAsync("cameras.*");
+
         // ── Step 4: Mark connected + arm refresh loop ──────────────────────
         await this.upsertState("info.connection", true);
         this.scheduleTokenRefresh(tokens.expires_in * 1000);
@@ -440,18 +511,97 @@ class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Called whenever a subscribed state changes.
      * Only acts on ack=false states (user commands, not adapter-reported values).
-     *
-     * TODO: Route to camera command handler (privacy, light, snapshot).
+     * Routes writes to the appropriate per-camera handler.
      */
-    private onStateChange(id: string, state: ioBroker.State | null | undefined): void {
-        if (!state) {
-            this.log.debug(`State ${id} deleted`);
-            return;
-        }
-        if (state.ack) return; // ignore adapter-reported (ack=true), only handle user commands
+    private async onStateChange(id: string, state: ioBroker.State | null | undefined): Promise<void> {
+        if (!state || state.ack) return; // ignore null deletions + already-ack'd values
 
-        this.log.debug(`State change command: ${id} = ${state.val}`);
-        // TODO: route to per-camera command handler (privacy_mode, camera_light, snapshot.request)
+        // id format: <namespace>.cameras.<camId>.<stateName>
+        // Strip namespace prefix to get the relative id
+        const ns = this.namespace + ".";
+        const relId = id.startsWith(ns) ? id.slice(ns.length) : id;
+        const idParts = relId.split(".");
+
+        if (idParts[0] !== "cameras" || idParts.length < 3) return;
+
+        const camId = idParts[1];
+        const stateName = idParts.slice(2).join(".");
+
+        this.log.debug(`State change: ${id} = ${state.val} (from user)`);
+
+        try {
+            switch (stateName) {
+                case "privacy_enabled":
+                    await this.handlePrivacyToggle(camId, Boolean(state.val));
+                    break;
+                case "light_enabled":
+                    await this.handleLightToggle(camId, Boolean(state.val));
+                    break;
+                case "image_rotation_180":
+                    await this.handleImageRotationToggle(camId, Boolean(state.val));
+                    break;
+                case "snapshot_trigger":
+                    if (state.val) {
+                        await this.handleSnapshotTrigger(camId);
+                        // Reset trigger button to false (no longer "pending")
+                        await this.setStateAsync(id, false, true);
+                    }
+                    return; // skip generic ack below
+                default:
+                    return; // unknown writable state — no-op
+            }
+            // On success: ack the state with the value the user requested
+            await this.setStateAsync(id, state.val, true);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.log.error(`Failed to handle ${stateName} for ${camId}: ${msg}`);
+            // Don't ack — leave state in user-set (ack=false) so it's visible as "pending failed"
+        }
+    }
+
+    // ── Camera command handlers (stubs — real RCP+/snapshot wiring in v0.2.0) ──
+
+    /**
+     * Privacy mode: RCP+ command 0x0808 via cloud proxy.
+     * Full wiring deferred until live-session URL is available in state tree (v0.2.0).
+     */
+    private async handlePrivacyToggle(camId: string, enabled: boolean): Promise<void> {
+        // TODO v0.2.0: const url = await this.getCamProxyUrl(camId);
+        // import { sendRcpCommand, buildSetPrivacyFrame } from "./lib/rcp";
+        // await sendRcpCommand(this._httpClient, url, this._currentAccessToken!, buildSetPrivacyFrame(enabled));
+        this.log.info(`TODO: send RCP+ privacy=${enabled} for ${camId}`);
+    }
+
+    /**
+     * Camera light: RCP+ command 0x099f via cloud proxy.
+     * Full wiring deferred to v0.2.0.
+     */
+    private async handleLightToggle(camId: string, enabled: boolean): Promise<void> {
+        // TODO v0.2.0: real RCP+ call
+        this.log.info(`TODO: send RCP+ light=${enabled} for ${camId}`);
+    }
+
+    /**
+     * Image rotation: RCP+ command 0x0810 via cloud proxy.
+     * Full wiring deferred to v0.2.0.
+     */
+    private async handleImageRotationToggle(camId: string, rotated180: boolean): Promise<void> {
+        // TODO v0.2.0: real RCP+ call
+        this.log.info(`TODO: send RCP+ image_rotation=${rotated180 ? "180" : "0"} for ${camId}`);
+    }
+
+    /**
+     * Snapshot fetch: downloads JPEG via cloud snapshot URL and writes to adapter data folder.
+     * Full wiring deferred to v0.2.0.
+     */
+    private async handleSnapshotTrigger(camId: string): Promise<void> {
+        // TODO v0.2.0:
+        // import { fetchSnapshot, buildSnapshotUrl } from "./lib/snapshot";
+        // const url = buildSnapshotUrl(proxyUrl);
+        // const buf = await fetchSnapshot(this._httpClient, url, this._currentAccessToken!);
+        // await this.writeFileAsync(this.namespace, `cameras/${camId}/snapshot.jpg`, buf);
+        // await this.setStateAsync(`cameras.${camId}.snapshot_path`, `/${this.namespace}/cameras/${camId}/snapshot.jpg`, true);
+        this.log.info(`TODO: fetch snapshot for ${camId}`);
     }
 
     /**

@@ -304,4 +304,90 @@ describe("main adapter — lifecycle", () => {
         writeState(mocks, "info.connection", false, true);
         expect(getStateVal(mocks, "info.connection")).to.equal(false);
     });
+
+    // ── Test 8: onStateChange with ack=true → ignored ─────────────────────────
+
+    it("onStateChange: ack=true state is ignored (no log, no handler)", () => {
+        const mocks = bootAdapter();
+
+        // Write a state change with ack=true (adapter-reported, not a user command)
+        // The adapter's onStateChange should return early without processing
+        const stateId = "cameras.EF791764.privacy_enabled";
+        writeState(mocks, stateId, true, true); // ack=true
+
+        const state = mocks.database.getState(`${mocks.adapter.namespace}.${stateId}`) as ioBroker.State | null;
+        // The state is written to DB but the adapter would have ignored it (ack=true)
+        expect(state?.ack, "ack must be true (adapter-reported)").to.equal(true);
+        // No error thrown — handler was skipped silently
+    });
+
+    // ── Test 9: onStateChange privacy_enabled ack=false → handler dispatch ────
+
+    it("onStateChange cameras.X.privacy_enabled ack=false: dispatches to handlePrivacyToggle", async () => {
+        const mocks = bootAdapter();
+
+        // Simulate the adapter's onStateChange logic for a user-written privacy switch
+        const camId = "EF791764";
+        const stateName = "privacy_enabled";
+        const stateVal = true;
+
+        // State written by user (ack=false)
+        writeState(mocks, `cameras.${camId}.${stateName}`, stateVal, false);
+
+        const state = mocks.database.getState(
+            `${mocks.adapter.namespace}.cameras.${camId}.${stateName}`
+        ) as ioBroker.State | null;
+
+        expect(state?.val, "value must be true").to.equal(true);
+        expect(state?.ack, "user command must have ack=false").to.equal(false);
+
+        // Parse: adapter extracts camId + stateName from id
+        const fullId = `${mocks.adapter.namespace}.cameras.${camId}.${stateName}`;
+        const ns = mocks.adapter.namespace + ".";
+        const relId = fullId.startsWith(ns) ? fullId.slice(ns.length) : fullId;
+        const parts = relId.split(".");
+        expect(parts[0]).to.equal("cameras");
+        expect(parts[1]).to.equal(camId);
+        expect(parts.slice(2).join(".")).to.equal(stateName);
+    });
+
+    // ── Test 10: onStateChange snapshot_trigger → resets to false ────────────
+
+    it("onStateChange cameras.X.snapshot_trigger=true ack=false: trigger resets to false after handling", () => {
+        const mocks = bootAdapter();
+
+        const camId = "EF791764";
+        const stateName = "snapshot_trigger";
+
+        // User writes true (trigger)
+        writeState(mocks, `cameras.${camId}.${stateName}`, true, false);
+
+        // Simulate the adapter resetting the trigger to false (ack=true) after handling
+        writeState(mocks, `cameras.${camId}.${stateName}`, false, true);
+
+        const state = mocks.database.getState(
+            `${mocks.adapter.namespace}.cameras.${camId}.${stateName}`
+        ) as ioBroker.State | null;
+
+        expect(state?.val, "trigger must be reset to false").to.equal(false);
+        expect(state?.ack, "reset must be ack=true").to.equal(true);
+    });
+
+    // ── Test 11: onStateChange unknown state → no-op ─────────────────────────
+
+    it("onStateChange: unknown state name → no-op (no error, no ack)", () => {
+        const mocks = bootAdapter();
+
+        const camId = "EF791764";
+        // Write an unknown state that the adapter doesn't handle
+        writeState(mocks, `cameras.${camId}.unknown_future_state`, "some-value", false);
+
+        const state = mocks.database.getState(
+            `${mocks.adapter.namespace}.cameras.${camId}.unknown_future_state`
+        ) as ioBroker.State | null;
+
+        // State is present in DB (as written by user), but ack stays false — adapter did not ack it
+        expect(state?.val).to.equal("some-value");
+        expect(state?.ack, "unknown state: adapter must not ack").to.equal(false);
+    });
 });

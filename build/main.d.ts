@@ -14,7 +14,6 @@
  *   6. [digest.ts]  HTTP Digest auth for local camera RCP+ commands (TODO)
  */
 import * as utils from "@iobroker/adapter-core";
-import "./lib/adapter-config";
 declare class BoschSmartHomeCamera extends utils.Adapter {
     /** setTimeout handle for the token refresh re-arm loop (ioBroker.Timeout | null). */
     private _refreshTimeout;
@@ -67,10 +66,29 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Called whenever a subscribed state changes.
      * Only acts on ack=false states (user commands, not adapter-reported values).
-     *
-     * TODO: Route to camera command handler (privacy, light, snapshot).
+     * Routes writes to the appropriate per-camera handler.
      */
     private onStateChange;
+    /**
+     * Privacy mode: RCP+ command 0x0808 via cloud proxy.
+     * Full wiring deferred until live-session URL is available in state tree (v0.2.0).
+     */
+    private handlePrivacyToggle;
+    /**
+     * Camera light: RCP+ command 0x099f via cloud proxy.
+     * Full wiring deferred to v0.2.0.
+     */
+    private handleLightToggle;
+    /**
+     * Image rotation: RCP+ command 0x0810 via cloud proxy.
+     * Full wiring deferred to v0.2.0.
+     */
+    private handleImageRotationToggle;
+    /**
+     * Snapshot fetch: downloads JPEG via cloud snapshot URL and writes to adapter data folder.
+     * Full wiring deferred to v0.2.0.
+     */
+    private handleSnapshotTrigger;
     /**
      * Called when the adapter is stopped.
      * Clears the refresh timer and sets info.connection = false.
