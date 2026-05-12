@@ -32,4 +32,4 @@ coverage/
 .nyc_output/
 
 # Local working drafts (community outreach prep, not project content)
-issue-*-comment.md
+issue-*-comment*.md
