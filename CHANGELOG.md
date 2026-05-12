@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-05-12
 ### Added
 - main.ts wiring: programmatic OAuth login on adapter startup
 - Token refresh loop with setTimeout re-arm pattern
@@ -26,5 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LICENSE MIT
 - Compliance with `@iobroker/repochecker` (0 fixable errors/warnings remaining)
 
-[Unreleased]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/releases/tag/v0.0.1

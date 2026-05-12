@@ -19,7 +19,26 @@ Planned features:
 
 ## Status
 
-**Pre-Alpha (0.1.0)** — TypeScript skeleton scaffolded 2026-05-12. Auth helpers + adapter entry point exist, no live camera data yet. Login + camera discovery are the next steps.
+**Alpha (0.1.0)** — First functional release (2026-05-12). Login and camera discovery work end-to-end.
+
+## What works in v0.1.0
+
+- Programmatic OAuth2 login (Bosch SingleKey ID)
+- Token auto-refresh (4xx → force re-login, 5xx → retry without re-login)
+- Camera discovery (Gen1 + Gen2, `GET /v11/video_inputs`)
+- State tree: `info.*`, `cameras.<id>.{name, firmware_version, hardware_version, generation, online}`
+- Encrypted password storage (`encryptedNative` — auto-encrypted by js-controller)
+- 205 unit tests passing
+
+## What's still TODO
+
+- v0.2.0 — Writable switches (privacy / light / image-rotation) + snapshot to file
+- v0.3.0 — Live stream (RTSPS / go2rtc bridge)
+- v0.4.0 — FCM motion events (motion, audio-alarm, person)
+- v0.5.0 — Mini-NVR (pre-roll ring buffer + local segments)
+- v1.0.0 — VIS widget + full feature parity with HA integration
+
+For related repos: https://github.com/mosandlt
 
 ## Development
 
@@ -41,11 +60,10 @@ npm run lint
 ```
 
 Next implementation steps (in order):
-1. `src/lib/auth.ts` — implement `generatePkcePair()`, `buildAuthUrl()`, `extractCode()`, `exchangeCode()`, `refreshAccessToken()`
-2. `src/lib/cameras.ts` — `GET /v1/accounts/{id}/cameras` → camera list
-3. `src/main.ts` — wire up OAuth2 login + state object creation per camera
-4. `src/lib/stream.ts` — go2rtc RTSPS source registration
-5. `src/lib/fcm.ts` — FCM push for motion/person/audio events
+1. `src/lib/rcp.ts` — wire RCP+ switches (privacy / light / image-rotation) into main.ts
+2. `src/lib/snapshot.ts` — wire snap.jpg fetcher into main.ts
+3. `src/lib/stream.ts` — go2rtc RTSPS source registration
+4. `src/lib/fcm.ts` — FCM push for motion/person/audio events
 
 ## Triggers for implementation start
 

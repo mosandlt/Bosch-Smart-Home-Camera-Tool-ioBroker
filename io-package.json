@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.0.1",
+    "version": "0.1.0",
     "news": {
+      "0.1.0": {
+        "en": "First functional release — programmatic OAuth login via Bosch SingleKey ID, camera discovery via /v11/video_inputs, token auto-refresh loop, info.* state tree. Library code for RCP+ protocol (rcp.ts) and snap.jpg fetcher (snapshot.ts) included as preview — switches and snapshots wire up in v0.2.0.",
+        "de": "Erste funktionale Version — programmatischer OAuth-Login via Bosch SingleKey ID, Kamera-Discovery via /v11/video_inputs, Token-Auto-Refresh-Loop, info.* State-Tree. Library-Code für RCP+-Protokoll (rcp.ts) und Snap.jpg-Fetcher (snapshot.ts) als Preview enthalten — Schalter und Snapshots werden in v0.2.0 verdrahtet.",
+        "ru": "Первый функциональный релиз — программный OAuth-вход через Bosch SingleKey ID, обнаружение камер через /v11/video_inputs, цикл автообновления токена, дерево состояний info.*. Библиотечный код для протокола RCP+ (rcp.ts) и загрузчика snap.jpg (snapshot.ts) включён в виде предварительной версии — переключатели и снимки будут подключены в v0.2.0.",
+        "pt": "Primeiro lançamento funcional — login OAuth programático via Bosch SingleKey ID, descoberta de câmeras via /v11/video_inputs, loop de atualização automática de token, árvore de estados info.*. Código de biblioteca para protocolo RCP+ (rcp.ts) e buscador snap.jpg (snapshot.ts) incluído como pré-visualização — interruptores e snapshots serão conectados na v0.2.0.",
+        "nl": "Eerste functionele release — programmatische OAuth-login via Bosch SingleKey ID, cameradetectie via /v11/video_inputs, token auto-refresh loop, info.* state tree. Bibliotheekcode voor RCP+-protocol (rcp.ts) en snap.jpg-fetcher (snapshot.ts) meegeleverd als preview — schakelaars en snapshots worden verbonden in v0.2.0.",
+        "fr": "Première version fonctionnelle — connexion OAuth programmatique via Bosch SingleKey ID, découverte des caméras via /v11/video_inputs, boucle d'actualisation automatique des tokens, arbre d'états info.*. Code bibliothèque pour le protocole RCP+ (rcp.ts) et le récupérateur snap.jpg (snapshot.ts) inclus en avant-première — les interrupteurs et les instantanés seront connectés dans la v0.2.0.",
+        "it": "Prima release funzionale — login OAuth programmatico tramite Bosch SingleKey ID, scoperta telecamere tramite /v11/video_inputs, ciclo di aggiornamento automatico token, albero di stati info.*. Codice libreria per protocollo RCP+ (rcp.ts) e fetcher snap.jpg (snapshot.ts) incluso come anteprima — switch e snapshot verranno collegati nella v0.2.0.",
+        "es": "Primera versión funcional — inicio de sesión OAuth programático via Bosch SingleKey ID, descubrimiento de cámaras via /v11/video_inputs, bucle de actualización automática de tokens, árbol de estados info.*. Código de biblioteca para protocolo RCP+ (rcp.ts) y obtenedor snap.jpg (snapshot.ts) incluido como vista previa — los interruptores y las instantáneas se conectarán en v0.2.0.",
+        "pl": "Pierwsze funkcjonalne wydanie — programowe logowanie OAuth przez Bosch SingleKey ID, wykrywanie kamer przez /v11/video_inputs, pętla automatycznego odświeżania tokenu, drzewo stanów info.*. Kod biblioteczny dla protokołu RCP+ (rcp.ts) i fetcher snap.jpg (snapshot.ts) dołączony jako podgląd — przełączniki i migawki zostaną podłączone w wersji v0.2.0.",
+        "uk": "Перший функціональний реліз — програмний OAuth-вхід через Bosch SingleKey ID, виявлення камер через /v11/video_inputs, цикл автооновлення токена, дерево станів info.*. Бібліотечний код для протоколу RCP+ (rcp.ts) та завантажувача snap.jpg (snapshot.ts) включено як попередній перегляд — перемикачі та знімки будуть підключені в v0.2.0.",
+        "zh-cn": "第一个功能版本——通过Bosch SingleKey ID实现程序化OAuth登录，通过/v11/video_inputs发现摄像头，令牌自动刷新循环，info.*状态树。RCP+协议库代码（rcp.ts）和snap.jpg获取器（snapshot.ts）作为预览包含——开关和快照将在v0.2.0中接入。"
+      },
       "0.0.1": {
         "en": "Initial skeleton release — namespace reservation only, not yet functional. Login + camera discovery in progress; first functional release will be v0.1.0.",
         "de": "Initiales Skeleton-Release — nur Namespace-Reservierung, noch nicht funktional. Login + Kamera-Erkennung in Entwicklung; erstes funktionales Release wird v0.1.0.",
