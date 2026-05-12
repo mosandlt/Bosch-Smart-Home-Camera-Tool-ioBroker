@@ -1,20 +1,20 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "news": {
-      "0.1.0": {
-        "en": "Initial scaffolding — skeleton only, no functionality yet",
-        "de": "Erstes Gerüst — nur Skeleton, noch keine Funktionalität",
-        "ru": "Начальный каркас — только скелет, функциональность ещё не реализована",
-        "pt": "Estrutura inicial — apenas esqueleto, sem funcionalidade ainda",
-        "nl": "Eerste opzet — alleen skelet, nog geen functionaliteit",
-        "fr": "Structure initiale — squelette uniquement, aucune fonctionnalité pour l'instant",
-        "it": "Scaffolding iniziale — solo scheletro, nessuna funzionalità ancora",
-        "es": "Estructura inicial — solo esqueleto, sin funcionalidad todavía",
-        "pl": "Początkowa struktura — tylko szkielet, brak funkcjonalności",
-        "uk": "Початкова структура — лише каркас, функціональність ще не реалізована",
-        "zh-cn": "初始骨架——仅框架，暂无功能"
+      "0.0.1": {
+        "en": "Initial skeleton release — namespace reservation only, not yet functional. Login + camera discovery in progress; first functional release will be v0.1.0.",
+        "de": "Initiales Skeleton-Release — nur Namespace-Reservierung, noch nicht funktional. Login + Kamera-Erkennung in Entwicklung; erstes funktionales Release wird v0.1.0.",
+        "ru": "Первоначальный скелетный релиз — только резервирование пространства имён, ещё не функционален. Вход и обнаружение камер в разработке; первый функциональный релиз — v0.1.0.",
+        "pt": "Lançamento esqueleto inicial — apenas reserva de namespace, ainda não funcional. Login + descoberta de câmeras em desenvolvimento; primeiro lançamento funcional será v0.1.0.",
+        "nl": "Initiële skelet-release — alleen namespace-reservering, nog niet functioneel. Login + cameradetectie in ontwikkeling; eerste functionele release wordt v0.1.0.",
+        "fr": "Version squelette initiale — réservation de namespace uniquement, pas encore fonctionnelle. Connexion + découverte des caméras en cours ; première version fonctionnelle sera v0.1.0.",
+        "it": "Release scheletro iniziale — solo prenotazione namespace, non ancora funzionale. Login + rilevamento telecamere in sviluppo; prima release funzionale sarà v0.1.0.",
+        "es": "Lanzamiento esqueleto inicial — solo reserva de namespace, aún no funcional. Login + descubrimiento de cámaras en desarrollo; primer lanzamiento funcional será v0.1.0.",
+        "pl": "Wstępne wydanie szkieletowe — tylko rezerwacja przestrzeni nazw, jeszcze nie funkcjonalne. Logowanie + wykrywanie kamer w trakcie tworzenia; pierwsze wydanie funkcjonalne to v0.1.0.",
+        "uk": "Початковий скелетний реліз — лише резервування простору імен, ще не функціональний. Вхід і виявлення камер у розробці; перший функціональний реліз буде v0.1.0.",
+        "zh-cn": "初始骨架版本——仅用于命名空间占位，尚无实际功能。登录和摄像头发现功能正在开发中；第一个功能版本将为v0.1.0。"
       }
     },
     "titleLang": {
