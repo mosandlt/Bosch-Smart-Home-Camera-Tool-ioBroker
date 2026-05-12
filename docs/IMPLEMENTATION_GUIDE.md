@@ -70,8 +70,8 @@ Key differences from HA integration:
     "platform": "Javascript/Node.js",
     "main": "build/main.js",
     "icon": "bosch-camera.png",
-    "extIcon": "https://raw.githubusercontent.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker/main/admin/bosch-camera.png",
-    "readme": "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker#readme",
+    "extIcon": "https://raw.githubusercontent.com/mosandlt/ioBroker.bosch-smart-home-camera/main/admin/bosch-camera.png",
+    "readme": "https://github.com/mosandlt/ioBroker.bosch-smart-home-camera#readme",
     "loglevel": "info",
     "mode": "daemon",
     "type": "multimedia",
@@ -641,7 +641,7 @@ Differences from Python `tls_proxy.py`:
 ## Publishing Path
 
 npm package name: `iobroker.bosch-smart-home-camera` (all lowercase — npm requirement)
-GitHub repo name: `ioBroker.bosch-smart-home-camera` or `Bosch-Smart-Home-Camera-Tool-ioBroker` (capital B allowed)
+GitHub repo name: `ioBroker.bosch-smart-home-camera` or `ioBroker.bosch-smart-home-camera` (capital B allowed)
 
 Steps:
 1. Publish to npm: `npm publish` (first time, as `mosandlt`)

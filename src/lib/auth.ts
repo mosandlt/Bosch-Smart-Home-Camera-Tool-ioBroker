@@ -105,10 +105,9 @@ export class AuthServerOutageError extends Error {
  * Mirrors Python's _pkce_pair() in config_flow.py.
  */
 export function generatePkcePair(): PkcePair {
-    // TODO: implement
-    // verifier  = crypto.randomBytes(64).toString('base64url')
-    // challenge = crypto.createHash('sha256').update(verifier).digest('base64url')
-    throw new Error("TODO: port from Python config_flow.py _pkce_pair()");
+    const verifier = crypto.randomBytes(64).toString("base64url");
+    const challenge = crypto.createHash("sha256").update(verifier).digest("base64url");
+    return { verifier, challenge };
 }
 
 /**
@@ -120,10 +119,16 @@ export function generatePkcePair(): PkcePair {
  * @returns Full authorization URL string
  */
 export function buildAuthUrl(challenge: string, state: string): string {
-    // TODO: implement
-    // Build query string with client_id, response_type=code, scope, redirect_uri,
-    // code_challenge, code_challenge_method=S256, state
-    throw new Error("TODO: port from Python config_flow.py _build_auth_url()");
+    const params = new URLSearchParams({
+        client_id:             CLIENT_ID,
+        response_type:         "code",
+        scope:                 SCOPES,
+        redirect_uri:          REDIRECT_URI,
+        code_challenge:        challenge,
+        code_challenge_method: "S256",
+        state,
+    });
+    return `${KEYCLOAK_BASE}/auth?${params.toString()}`;
 }
 
 /**
@@ -134,9 +139,18 @@ export function buildAuthUrl(challenge: string, state: string): string {
  * @returns The authorization code, or null if not found / error present
  */
 export function extractCode(redirectUrl: string): string | null {
-    // TODO: implement
-    // Parse query string, check for "error" param, return "code" param
-    throw new Error("TODO: port from Python config_flow.py _extract_code()");
+    try {
+        // Handle both full URLs and bare query strings (user may paste either)
+        const urlStr = redirectUrl.trim();
+        const hasScheme = urlStr.startsWith("http://") || urlStr.startsWith("https://");
+        const parsed = new URL(hasScheme ? urlStr : `https://placeholder.invalid/?${urlStr.replace(/^[^?]*\?/, "")}`);
+        if (parsed.searchParams.get("error")) {
+            return null;
+        }
+        return parsed.searchParams.get("code");
+    } catch {
+        return null;
+    }
 }
 
 // ── Token operations ──────────────────────────────────────────────────────────
@@ -157,12 +171,49 @@ export async function exchangeCode(
     code: string,
     verifier: string,
 ): Promise<TokenResult | null> {
-    // TODO: implement
-    // POST {KEYCLOAK_BASE}/token
-    // body: client_id, client_secret, grant_type=authorization_code,
-    //       code, redirect_uri=REDIRECT_URI, code_verifier=verifier
-    // Return parsed token JSON or null on error
-    throw new Error("TODO: port from Python config_flow.py _exchange_code()");
+    try {
+        const params = new URLSearchParams({
+            client_id:     CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            grant_type:    "authorization_code",
+            code,
+            redirect_uri:  REDIRECT_URI,
+            code_verifier: verifier,
+        });
+        const resp = await httpClient.post<TokenResult>(
+            `${KEYCLOAK_BASE}/token`,
+            params.toString(),
+            { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+        );
+        return {
+            access_token:      resp.data.access_token,
+            refresh_token:     resp.data.refresh_token,
+            expires_in:        resp.data.expires_in,
+            refresh_expires_in: resp.data.refresh_expires_in ?? 0,
+            token_type:        resp.data.token_type,
+            scope:             resp.data.scope,
+        };
+    } catch (err: unknown) {
+        if (axios.isAxiosError(err)) {
+            const status = err.response?.status;
+            if (status !== undefined) {
+                const body = JSON.stringify(err.response?.data ?? "");
+                if (status === 400 || status === 401) {
+                    throw new RefreshTokenInvalidError(
+                        `Keycloak HTTP ${status}: ${body}`,
+                    );
+                }
+                if (status >= 500) {
+                    throw new AuthServerOutageError(
+                        `Bosch Keycloak HTTP ${status}`,
+                    );
+                }
+            }
+            // Network/timeout error — transient, caller may retry
+            return null;
+        }
+        throw err;
+    }
 }
 
 /**
@@ -180,13 +231,49 @@ export async function refreshAccessToken(
     httpClient: AxiosInstance,
     refreshToken: string,
 ): Promise<TokenResult | null> {
-    // TODO: implement
-    // POST {KEYCLOAK_BASE}/token
-    // body: client_id, client_secret, grant_type=refresh_token, refresh_token
-    // Handle 400/401 → RefreshTokenInvalidError
-    // Handle 5xx    → AuthServerOutageError
-    // Handle network error → return null (caller retries)
-    throw new Error("TODO: port from Python config_flow.py _do_refresh()");
+    try {
+        const params = new URLSearchParams({
+            client_id:     CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            grant_type:    "refresh_token",
+            refresh_token: refreshToken,
+        });
+        const resp = await httpClient.post<TokenResult>(
+            `${KEYCLOAK_BASE}/token`,
+            params.toString(),
+            { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
+        );
+        return {
+            access_token:      resp.data.access_token,
+            refresh_token:     resp.data.refresh_token,
+            expires_in:        resp.data.expires_in,
+            refresh_expires_in: resp.data.refresh_expires_in ?? 0,
+            token_type:        resp.data.token_type,
+            scope:             resp.data.scope,
+        };
+    } catch (err: unknown) {
+        if (axios.isAxiosError(err)) {
+            const status = err.response?.status;
+            if (status !== undefined) {
+                const body = JSON.stringify(err.response?.data ?? "");
+                // 400/401 → non-recoverable, token is invalid → user must re-login
+                if (status === 400 || status === 401) {
+                    throw new RefreshTokenInvalidError(
+                        `Keycloak HTTP ${status}: ${body}`,
+                    );
+                }
+                // 5xx → Bosch server outage → token still valid, retry later
+                if (status >= 500) {
+                    throw new AuthServerOutageError(
+                        `Bosch Keycloak HTTP ${status}`,
+                    );
+                }
+            }
+            // Network/timeout error — transient, caller may retry
+            return null;
+        }
+        throw err;
+    }
 }
 
 /**
@@ -200,11 +287,22 @@ export async function refreshAccessToken(
  * @returns Client ID string (e.g. "oss_residential_app") or null if unparseable
  */
 export function detectTokenClientId(bearerToken: string): string | null {
-    // TODO: implement
-    // Split by ".", base64url-decode part[1], JSON.parse, return payload.azp
-    throw new Error(
-        "TODO: port from Python config_flow.py _detect_token_client_id()",
-    );
+    if (!bearerToken) {
+        return null;
+    }
+    try {
+        const parts = bearerToken.split(".");
+        if (parts.length < 2) {
+            return null;
+        }
+        // Pad base64url to a multiple of 4 for Buffer.from
+        const padded = parts[1] + "=".repeat((4 - (parts[1].length % 4)) % 4);
+        const payload = JSON.parse(Buffer.from(padded, "base64url").toString("utf-8")) as Record<string, unknown>;
+        const azp = payload["azp"];
+        return azp != null ? String(azp) : null;
+    } catch {
+        return null;
+    }
 }
 
 // ── HTTP client factory ───────────────────────────────────────────────────────

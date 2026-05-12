@@ -409,9 +409,9 @@ Online: https://adapter-check.iobroker.in/
 Local:
 
 ```bash
-npx @iobroker/repochecker mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker
+npx @iobroker/repochecker mosandlt/ioBroker.bosch-smart-home-camera
 # With debug output:
-npx @iobroker/repochecker mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker --debug
+npx @iobroker/repochecker mosandlt/ioBroker.bosch-smart-home-camera --debug
 ```
 
 **Key error categories to pre-empt:**

@@ -1,4 +1,4 @@
-# Bosch-Smart-Home-Camera-Tool-ioBroker
+# ioBroker.bosch-smart-home-camera
 
 ioBroker adapter for Bosch Smart Home Cameras — early development.
 

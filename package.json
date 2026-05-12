@@ -6,7 +6,7 @@
     "name": "mosandlt",
     "email": "10558666+mosandlt@users.noreply.github.com"
   },
-  "homepage": "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker",
+  "homepage": "https://github.com/mosandlt/ioBroker.bosch-smart-home-camera",
   "license": "MIT",
   "keywords": [
     "iobroker",
@@ -23,7 +23,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "test": "npm run test:js && npm run test:package",
-    "test:js": "mocha --config test/.mocharc.yml",
+    "test:js": "TS_NODE_TRANSPILE_ONLY=true TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' mocha --config test/.mocharc.yml",
     "test:package": "mocha test/package.js --exit",
     "test:integration": "mocha test/integration.js --exit",
     "lint": "eslint src/ --ext .ts"
@@ -50,9 +50,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker.git"
+    "url": "https://github.com/mosandlt/ioBroker.bosch-smart-home-camera.git"
   },
   "bugs": {
-    "url": "https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-ioBroker/issues"
+    "url": "https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/issues"
   }
 }
