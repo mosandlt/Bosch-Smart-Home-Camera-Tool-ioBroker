@@ -55,6 +55,14 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     private _snapshotFailCount;
     /** Consecutive snapshot failures before a camera is marked offline. */
     private static readonly OFFLINE_THRESHOLD;
+    /**
+     * Polling timer for /v11/events when FCM push registration failed.
+     * Drives event ingestion without push so motion/audio events still surface.
+     * Null when FCM is healthy (push is the primary path).
+     */
+    private _eventPollTimer;
+    /** Event-poll interval (ms) when FCM push is unavailable. */
+    private static readonly EVENT_POLL_INTERVAL_MS;
     constructor(options?: Partial<utils.AdapterOptions>);
     /**
      * Write a state only if the value changed (iobroker.ring upsertState pattern).
@@ -223,6 +231,16 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * @param camId
      */
     private handleSnapshotTrigger;
+    /**
+     * Start the polling fallback: re-fetch /v11/events every 30 s.
+     *
+     * Activated only when FCM push registration fails for both iOS and Android.
+     * Mirrors HA's `fcm_push_mode=polling` behaviour — adapter stays usable, just
+     * with higher motion-event latency (~30 s vs. ~2 s with push).
+     *
+     * Idempotent: re-calling while a timer is already armed is a no-op.
+     */
+    private _startEventPolling;
     /**
      * Update `cameras.<id>.online` based on snapshot reachability.
      *

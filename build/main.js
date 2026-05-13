@@ -104,6 +104,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
     _snapshotFailCount = new Map();
     /** Consecutive snapshot failures before a camera is marked offline. */
     static OFFLINE_THRESHOLD = 3;
+    /**
+     * Polling timer for /v11/events when FCM push registration failed.
+     * Drives event ingestion without push so motion/audio events still surface.
+     * Null when FCM is healthy (push is the primary path).
+     */
+    _eventPollTimer = null;
+    /** Event-poll interval (ms) when FCM push is unavailable. */
+    static EVENT_POLL_INTERVAL_MS = 30_000;
     constructor(options = {}) {
         super({
             ...options,
@@ -214,7 +222,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
             type: "state",
             common: {
                 role: "indicator.status",
-                name: "FCM push listener status: healthy / stub / error / stopped",
+                name: "FCM push listener status: healthy / polling / disconnected / error / stub / stopped",
                 type: "string",
                 read: true,
                 write: false,
@@ -722,27 +730,53 @@ class BoschSmartHomeCamera extends utils.Adapter {
             };
         }
         else {
-            // No valid tokens — check if user has pasted a redirect URL
-            const pastedUrl = this.config.redirect_url ?? "";
-            if (pastedUrl && pastedUrl.includes("code=")) {
-                // Step 2: user pasted callback URL — extract code, exchange for tokens
+            // No valid access token. Before falling back to PKCE re-login try to
+            // mint a fresh access_token from the stored refresh_token — the
+            // common case after the adapter has been stopped longer than the
+            // 3600 s access-token lifetime. Without this step a 1 h restart
+            // pause would force the user back through the browser-login flow
+            // even though the refresh_token (offline_access, ~30 d) is still
+            // valid.
+            const rtState = await this.getStateAsync("info.refresh_token");
+            const storedRefreshToken = typeof rtState?.val === "string" ? rtState.val : "";
+            let refreshed = null;
+            if (storedRefreshToken) {
                 try {
-                    tokens = await this.handleRedirectPaste(pastedUrl);
+                    refreshed = await (0, auth_1.refreshAccessToken)(this._httpClient, storedRefreshToken);
                 }
                 catch (err) {
                     const msg = err instanceof Error ? err.message : String(err);
-                    this.log.error(`Login failed: ${msg}`);
-                    await this.setStateAsync("info.connection", false, true);
-                    this.terminate("Login failed — check Admin UI redirect_url field", 11);
-                    return;
+                    this.log.warn(`Refresh token exchange failed (${msg}) — falling back to browser login`);
                 }
             }
+            if (refreshed) {
+                this.log.info("Stored access token expired — refreshed silently via offline refresh_token");
+                await this.saveTokens(refreshed);
+                tokens = refreshed;
+            }
             else {
-                // Step 1: no tokens, no pasted URL — generate PKCE pair and show login URL
-                await this.showLoginUrl();
-                // Stay alive in "waiting for setup" mode — user needs to paste URL
-                await this.setStateAsync("info.connection", false, true);
-                return;
+                // Refresh either absent or rejected — user must redo PKCE login
+                const pastedUrl = this.config.redirect_url ?? "";
+                if (pastedUrl && pastedUrl.includes("code=")) {
+                    // Step 2: user pasted callback URL — extract code, exchange for tokens
+                    try {
+                        tokens = await this.handleRedirectPaste(pastedUrl);
+                    }
+                    catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        this.log.error(`Login failed: ${msg}`);
+                        await this.setStateAsync("info.connection", false, true);
+                        this.terminate("Login failed — check Admin UI redirect_url field", 11);
+                        return;
+                    }
+                }
+                else {
+                    // Step 1: no tokens, no pasted URL — generate PKCE pair and show login URL
+                    await this.showLoginUrl();
+                    // Stay alive in "waiting for setup" mode — user needs to paste URL
+                    await this.setStateAsync("info.connection", false, true);
+                    return;
+                }
             }
         }
         // ── Step 2: Discover cameras ───────────────────────────────────────
@@ -790,6 +824,17 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // ── Step 4: Mark connected + arm refresh loop ──────────────────────
         await this.upsertState("info.connection", true);
         this.scheduleTokenRefresh(tokens.expires_in * 1000);
+        // ── Step 4b: Auto-snapshot per camera to flip `online` from default ─
+        // ensureCameraObjects() seeds `online=false` (list endpoint lacks the
+        // field). Fire one snapshot per camera so markCameraReachability() can
+        // flip it to the real state. Fire-and-forget — failure is logged at
+        // debug, never blocks adapter start.
+        for (const cam of cameras) {
+            void this.handleSnapshotTrigger(cam.id).catch((err) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.log.debug(`Startup snapshot for ${cam.id.slice(0, 8)} failed: ${msg}`);
+            });
+        }
         // ── Step 5: FCM push listener (real implementation v0.3.0) ──────────
         this._fcmListener = new fcm_1.FcmListener(this._httpClient, tokens.access_token);
         // Silent push wake-up — Bosch sends no payload; fetch events from API
@@ -810,6 +855,16 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this._fcmListener.on("registered", (creds) => {
             this.log.info(`FCM registered: ${creds.fcmToken.substring(0, 12)}...`);
             void this.setStateAsync("info.fcm_active", "healthy", true);
+        });
+        // Per-mode failure diagnostic — emitted by FcmListener._tryStart on every
+        // mode that fails to register. Without this log the user sees only the
+        // generic "both iOS and Android failed" message and can't diagnose the
+        // real cause (network, CBS auth, @aracna/fcm bug, ...).
+        this._fcmListener.on("mode-failed", (info) => {
+            this.log.warn(`FCM ${info.mode} registration failed: ${info.error.message}`);
+            if (info.error.stack) {
+                this.log.debug(`FCM ${info.mode} stack: ${info.error.stack}`);
+            }
         });
         // Error events from FCM internals
         this._fcmListener.on("error", (err) => {
@@ -833,10 +888,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 await this.setStateAsync("info.fcm_active", "error", true);
             }
             else {
-                this.log.error(`FCM start failed: ${msg}`);
-                await this.setStateAsync("info.fcm_active", "error", true);
+                // Both iOS and Android registration failed. Fall back to polling
+                // (mirrors HA's `fcm_push_mode=polling` default-fallback) — adapter
+                // stays usable; events arrive via the polling timer every 30 s.
+                this.log.warn(`FCM push unavailable (${msg}) — falling back to event polling every ${BoschSmartHomeCamera.EVENT_POLL_INTERVAL_MS / 1000}s`);
+                await this.setStateAsync("info.fcm_active", "polling", true);
+                this._startEventPolling();
             }
-            // Don't crash — adapter still usable without push (slower polling)
+            // Don't crash — adapter still usable without push (polling fallback)
         }
         this.log.info(`Bosch Smart Home Camera adapter ready — ${cameras.length} camera(s) active`);
     }
@@ -1148,6 +1207,32 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
     }
     /**
+     * Start the polling fallback: re-fetch /v11/events every 30 s.
+     *
+     * Activated only when FCM push registration fails for both iOS and Android.
+     * Mirrors HA's `fcm_push_mode=polling` behaviour — adapter stays usable, just
+     * with higher motion-event latency (~30 s vs. ~2 s with push).
+     *
+     * Idempotent: re-calling while a timer is already armed is a no-op.
+     */
+    _startEventPolling() {
+        if (this._eventPollTimer) {
+            return;
+        }
+        const timer = setInterval(() => {
+            void this.fetchAndProcessEvents().catch((err) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.log.debug(`Event polling tick failed: ${msg}`);
+            });
+        }, BoschSmartHomeCamera.EVENT_POLL_INTERVAL_MS);
+        // unref() so the timer doesn't keep the Node event loop alive on its
+        // own — important for mocha which won't exit while pending intervals
+        // exist. Production: ioBroker holds the loop open via other handles, so
+        // unref() has no effect on uptime.
+        timer.unref();
+        this._eventPollTimer = timer;
+    }
+    /**
      * Update `cameras.<id>.online` based on snapshot reachability.
      *
      * Bosch's list endpoint does not expose connectivity, so the only signal we have
@@ -1186,6 +1271,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 if (this._refreshTimeout) {
                     this.clearTimeout(this._refreshTimeout);
                     this._refreshTimeout = null;
+                }
+                // Stop event polling timer (only set when FCM fell back to polling)
+                if (this._eventPollTimer) {
+                    clearInterval(this._eventPollTimer);
+                    this._eventPollTimer = null;
                 }
                 // Stop FCM listener
                 if (this._fcmListener) {

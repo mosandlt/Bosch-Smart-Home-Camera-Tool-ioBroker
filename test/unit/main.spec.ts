@@ -853,6 +853,11 @@ describe("main adapter — v0.2.0 command handlers", () => {
             extraAxiosResponses: [{ status: 200, data: {} }], // PUT /privacy ack
         });
         await adapter.readyHandler!();
+        // v0.3.3 fires one startup snapshot per camera so cameras.<id>.online flips
+        // from the default false to the real state. Discard those before asserting
+        // on the privacy-toggle behaviour.
+        await flushAutoSnapshot();
+        fetchSnapshotStub.resetHistory();
 
         const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.privacy_enabled`;

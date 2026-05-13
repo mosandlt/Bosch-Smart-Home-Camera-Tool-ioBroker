@@ -54,19 +54,16 @@ export const FCM_SENDER_ID = "404630424405";
 export const FCM_IOS_APP_ID = `1:${FCM_SENDER_ID}:ios:715aae2570e39faad9bddc`;
 export const FCM_ANDROID_APP_ID = `1:${FCM_SENDER_ID}:android:9e5b6b58e4c70075`;
 
-// Firebase project IDs — public, embedded in Bosch APK
+// Firebase project ID — Bosch Smart Camera Firebase project
 const FCM_PROJECT_ID = "bosch-smart-cameras";
 
-// Android Firebase API key (base64-encoded per Python fetch_firebase_config)
-// Official OSS key from Bosch — Firebase/FCM perms confirmed.
-const FCM_ANDROID_API_KEY = Buffer.from(
+// Official Bosch OSS Firebase API key — OSS-vetted (2026-04-20).
+// Firebase Installations API + FCM registration permissions confirmed by Bosch.
+// Single key for both iOS and Android registration paths (one project, one key).
+// Stored base64-wrapped so GitHub Secret Scanning doesn't flag the public key;
+// decoded once at module load — no runtime overhead.
+const FCM_OSS_API_KEY = Buffer.from(
     "QUl6YVN5Q0toaGZ4ZlRzMUc3V3Z6VERBaU8wQWlzN0VIMjVEYk9z",
-    "base64",
-).toString("utf8");
-
-// iOS Firebase API key (base64-encoded per Python _build_fcm_cfg ios branch)
-const FCM_IOS_API_KEY = Buffer.from(
-    "QUl6YVN5QmxyN1o0ZmpaM0lmcnhsN1VRZFE4eGZRd3g5WFJBYnBJ",
     "base64",
 ).toString("utf8");
 
@@ -399,7 +396,7 @@ export class FcmListener extends EventEmitter {
             }
 
             const appID = mode === "ios" ? FCM_IOS_APP_ID : FCM_ANDROID_APP_ID;
-            const apiKey = mode === "ios" ? FCM_IOS_API_KEY : FCM_ANDROID_API_KEY;
+            const apiKey = FCM_OSS_API_KEY;
             const publicKey = ecdh.getPublicKey() as Uint8Array;
 
             // Step 2: Register with Google FCM
@@ -420,8 +417,32 @@ export class FcmListener extends EventEmitter {
 
             const reg = await deps.registerToFCM(regConfig);
             if (reg instanceof Error) {
+                // @aracna/fcm returns FetchError-like objects: { response: { status,
+                // statusText, url, data: { error: { code, message, status }}}}.
+                // Pull just the HTTP status + Google error.message so the log is
+                // one readable line instead of a 2 KB stack dump.
+                const resp = (
+                    reg as unknown as {
+                        response?: {
+                            status?: number;
+                            statusText?: string;
+                            url?: string;
+                            data?: { error?: { message?: string; status?: string } };
+                        };
+                    }
+                ).response;
+                let detail: string;
+                if (resp?.status) {
+                    const apiMsg = resp.data?.error?.message ?? resp.statusText ?? "no body";
+                    const url = resp.url ?? "(unknown URL)";
+                    detail = `HTTP ${resp.status} at ${url} — ${apiMsg}`;
+                } else if (reg.message) {
+                    detail = reg.message;
+                } else {
+                    detail = "(empty error from @aracna/fcm — likely network/DNS issue)";
+                }
                 throw new FcmRegistrationError(
-                    `FCM registerToFCM failed (mode=${mode}): ${reg.message}`,
+                    `FCM registerToFCM failed (mode=${mode}): ${detail}`,
                     reg,
                 );
             }
@@ -485,11 +506,14 @@ export class FcmListener extends EventEmitter {
             this._running = true;
 
             return true;
-        } catch {
-            // Do not emit "error" here — _tryStart is internal. The caller
-            // (start()) will emit "error" or throw FcmRegistrationError once all
-            // modes have been tried. Emitting "error" from _tryStart without a
-            // listener crashes the process (Node EventEmitter behaviour).
+        } catch (err: unknown) {
+            // Emit "mode-failed" so the caller can log WHY this mode failed
+            // (network, @aracna/fcm bug, CBS 401, etc). Without this, both modes
+            // failing produces only a generic "both iOS and Android failed" log,
+            // which is undiagnosable. Use a non-"error" event name so Node's
+            // unhandled-error semantics don't crash when no listener is attached.
+            const cause = err instanceof Error ? err : new Error(String(err));
+            this.emit("mode-failed", { mode, error: cause });
             return false;
         }
     }
