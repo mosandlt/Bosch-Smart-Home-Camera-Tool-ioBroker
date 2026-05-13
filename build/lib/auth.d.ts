@@ -128,8 +128,15 @@ export declare function refreshAccessToken(httpClient: AxiosInstance, refreshTok
 export declare function detectTokenClientId(bearerToken: string): string | null;
 /**
  * Create a pre-configured Axios instance for Bosch API calls.
- * SSL verification is disabled (Bosch endpoints use self-signed certs on LAN;
- * for cloud endpoints this is safe since we pin the domain, not the cert).
+ *
+ * TLS verification is disabled (`rejectUnauthorized: false`) for two reasons:
+ *   1. Local LAN camera endpoints use self-signed certs that no public CA signs.
+ *   2. The Bosch cloud CA chain is not always in Node.js's bundled CA store on
+ *      macOS / containerised Linux — observed as "unable to get local issuer
+ *      certificate" against `residential.cbs.boschsecurity.com`. The Python
+ *      reference implementation (HA integration, CLI) passes `ssl=False` for the
+ *      same reason. Domain pinning (we only ever call `*.boschsecurity.com` and
+ *      `*.bosch.com`) keeps the security posture acceptable.
  */
 export declare function createHttpClient(): AxiosInstance;
 export { crypto };

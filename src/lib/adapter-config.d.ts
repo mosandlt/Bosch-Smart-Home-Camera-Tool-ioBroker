@@ -4,10 +4,12 @@
 declare global {
     namespace ioBroker {
         interface AdapterConfig {
-            /** Bosch SingleKey ID email address */
-            username: string;
-            /** Bosch SingleKey ID password */
-            password: string;
+            /**
+             * One-time-use OIDC redirect URL pasted by the user after browser login.
+             * Format: "https://www.bosch.com/boschcam?code=XXX&state=YYY"
+             * Cleared by the adapter after successful token exchange.
+             */
+            redirect_url: string;
             /** Cloud region: "EU" | "US" */
             region: string;
         }

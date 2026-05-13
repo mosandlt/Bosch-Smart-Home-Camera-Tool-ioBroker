@@ -16,6 +16,7 @@
  */
 
 import axios, { type AxiosInstance } from "axios";
+import { digestRequest } from "./digest";
 
 // ── Direction constants (mirrors Python RCP_DIRECTION_* convention) ────────────
 
@@ -261,17 +262,29 @@ export function buildGetSnapshotFrame(): RcpParams {
 
 // ── HTTP helpers ───────────────────────────────────────────────────────────────
 
+/** Optional Digest auth credentials for LOCAL RCP calls. */
+export interface RcpAuth {
+    user: string;
+    password: string;
+}
+
 /**
  * Send an RCP command to the /rcp.xml endpoint and return the parsed response.
  *
  * Mirrors Python rcp_local_read() for the local path and rcp_read() for the
  * cloud proxy path. Uses axios so callers can inject a mock for testing.
  *
- * @param httpClient  Axios instance (allows injection for testing)
- * @param baseUrl     Full URL to rcp.xml, e.g. "http://192.168.20.149/rcp.xml"
+ * When `auth` is provided, performs a Digest-authenticated request via the
+ * helper in digest.ts (two-step 401 challenge → authenticated GET). LOCAL cams
+ * (both Gen1 and Gen2) require Digest on /rcp.xml. The cloud proxy URL is
+ * pre-authenticated via the URL hash and must be called WITHOUT auth.
+ *
+ * @param httpClient  Axios instance (used for the no-auth code path)
+ * @param baseUrl     Full URL to rcp.xml, e.g. "https://192.0.2.10:443/rcp.xml"
  *                    or "https://proxy-01.live.cbs.boschsecurity.com:42090/{hash}/rcp.xml"
  * @param params      RCP params from buildRcpFrame() or the specific builders
  * @param timeoutMs   Request timeout in milliseconds (default 5000)
+ * @param auth        Optional Digest credentials — required for LOCAL connection type
  * @returns           Parsed RcpResponse, or null if the server returned non-200
  * @throws RcpError   if the camera returned <err>
  * @throws RcpNetworkError on HTTP error or network failure
@@ -281,8 +294,33 @@ export async function sendRcpCommand(
     baseUrl: string,
     params: RcpParams,
     timeoutMs = 5000,
+    auth?: RcpAuth,
 ): Promise<RcpResponse> {
+    // Build query string from params (RCP+ uses URL-encoded GET parameters)
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined && v !== null) qs.append(k, String(v));
+    }
+    const fullUrl = `${baseUrl}?${qs.toString()}`;
+
     try {
+        if (auth) {
+            // LOCAL path: Digest auth (RFC 7616 two-step)
+            const resp = await digestRequest(fullUrl, auth.user, auth.password, {
+                method: "GET",
+                timeout: timeoutMs,
+                rejectUnauthorized: false,
+            });
+            if (resp.status !== 200) {
+                throw new RcpNetworkError(
+                    resp.status,
+                    `RCP HTTP ${resp.status} for command ${params.command} (digest auth)`,
+                );
+            }
+            return parseRcpResponse(resp.data, params.command);
+        }
+
+        // REMOTE path: pre-authenticated cloud proxy URL — no auth needed
         const resp = await httpClient.get<Buffer>(baseUrl, {
             params,
             responseType: "arraybuffer",
@@ -295,6 +333,7 @@ export async function sendRcpCommand(
 
         return parseRcpResponse(raw, params.command);
     } catch (err: unknown) {
+        if (err instanceof RcpNetworkError) throw err;
         if (axios.isAxiosError(err)) {
             const status = err.response?.status;
             throw new RcpNetworkError(

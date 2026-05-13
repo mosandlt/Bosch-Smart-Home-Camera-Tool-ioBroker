@@ -6,12 +6,14 @@
  * ioBroker state objects for each camera entity.
  *
  * Implementation roadmap:
- *   1. [auth.ts]    OAuth2 PKCE login → access_token + refresh_token
- *   2. [cameras.ts] GET /v11/video_inputs → camera list
- *   3. [states]     Create ioBroker state tree per camera
- *   4. [stream.ts]  Register go2rtc RTSPS sources per camera (TODO)
- *   5. [fcm.ts]     FCM push registration → motion/audio/person events (TODO)
- *   6. [digest.ts]  HTTP Digest auth for local camera RCP+ commands (TODO)
+ *   1. [auth.ts]         OAuth2 PKCE login → access_token + refresh_token
+ *   2. [cameras.ts]      GET /v11/video_inputs → camera list
+ *   3. [states]          Create ioBroker state tree per camera
+ *   4. [live_session.ts] Open proxy session per camera (v0.2.0)
+ *   5. [tls_proxy.ts]    Register RTSPS sources as local RTSP via TLS proxy (v0.2.0)
+ *   6. [fcm.ts]          FCM push registration → motion/audio/person events (stub → v0.3.0)
+ *   7. [rcp.ts]          RCP+ commands: privacy, light, image rotation (v0.2.0)
+ *   8. [snapshot.ts]     Snapshot fetch + write to adapter file-store (v0.2.0)
  */
 
 import * as utils from "@iobroker/adapter-core";
@@ -19,14 +21,45 @@ import * as utils from "@iobroker/adapter-core";
 // no runtime import needed (import would fail: .d.ts files produce no .js output)
 
 import {
+    generatePkcePair,
+    buildAuthUrl,
+    exchangeCode,
+    extractCode,
     refreshAccessToken,
     createHttpClient,
     RefreshTokenInvalidError,
     type TokenResult,
 } from "./lib/auth";
 
-import { loginWithCredentials } from "./lib/login";
+// login.ts is kept for tests / future headless paths but not called from here.
+// See deprecation notice in src/lib/login.ts.
 import { fetchCameras, type BoschCamera, UnauthorizedError } from "./lib/cameras";
+
+import {
+    openLiveSession,
+    closeLiveSession,
+    type LiveSession,
+} from "./lib/live_session";
+
+import {
+    buildSetPrivacyFrame,
+    buildSetLightFrame,
+    buildSetImageRotationFrame,
+    sendRcpCommand,
+} from "./lib/rcp";
+
+import { fetchSnapshot, buildSnapshotUrl } from "./lib/snapshot";
+
+import {
+    startTlsProxy,
+    type TlsProxyHandle,
+} from "./lib/tls_proxy";
+
+import {
+    FcmListener,
+    FcmNotImplementedError,
+    type FcmEventPayload,
+} from "./lib/fcm";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,6 +87,18 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
     /** Axios instance shared across all HTTP calls. */
     private _httpClient = createHttpClient();
+
+    /** Live sessions keyed by camera ID. Re-opened when stale. */
+    private _liveSessions = new Map<string, LiveSession>();
+
+    /** TLS proxy handles keyed by camera ID. */
+    private _tlsProxies = new Map<string, TlsProxyHandle>();
+
+    /** Camera metadata keyed by camera ID (populated in onReady from fetchCameras). */
+    private _cameras = new Map<string, BoschCamera>();
+
+    /** FCM push listener (null until onReady wires it up). */
+    private _fcmListener: FcmListener | null = null;
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({
@@ -89,6 +134,28 @@ class BoschSmartHomeCamera extends utils.Adapter {
             common: { name: "Adapter information" },
             native: {},
         });
+
+        // Root "meta" object is required by ioBroker's writeFileAsync() to be able
+        // to store binary files under bosch-smart-home-camera.0/<path>. Without it
+        // writeFileAsync throws "is not an object of type 'meta'". The object_id
+        // must be the full namespace ("bosch-smart-home-camera.0") which is foreign
+        // from the adapter's perspective (it manages bosch-smart-home-camera.0.*),
+        // hence extendForeignObject. We only set if missing — never clobber.
+        try {
+            const existing = await this.getForeignObjectAsync(this.namespace);
+            if (!existing) {
+                await this.setForeignObjectAsync(this.namespace, {
+                    type: "meta",
+                    common: {
+                        name: "Bosch Smart Home Camera adapter data",
+                        type: "meta.folder",
+                    } as unknown as ioBroker.MetaCommon,
+                    native: {},
+                });
+            }
+        } catch (err) {
+            this.log.warn(`Could not ensure meta object for file storage: ${(err as Error).message}`);
+        }
 
         await this.setObjectNotExistsAsync("info.connection", {
             type: "state",
@@ -140,6 +207,47 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 read: true,
                 write: false,
                 def: 0,
+            },
+            native: {},
+        });
+
+        await this.setObjectNotExistsAsync("info.fcm_active", {
+            type: "state",
+            common: {
+                role: "indicator.status",
+                name: "FCM push listener status: healthy / stub / error / stopped",
+                type: "string",
+                read: true,
+                write: false,
+                def: "stub",
+            },
+            native: {},
+        });
+
+        // PKCE verifier + state stored across restarts so a stale URL still works
+        // (regenerated only after successful code exchange or explicit reset).
+        await this.setObjectNotExistsAsync("info.pkce_verifier", {
+            type: "state",
+            common: {
+                role: "text",
+                name: "PKCE code_verifier (internal — do not share)",
+                type: "string",
+                read: true,
+                write: false,
+                def: "",
+            },
+            native: {},
+        });
+
+        await this.setObjectNotExistsAsync("info.pkce_state", {
+            type: "state",
+            common: {
+                role: "text",
+                name: "OIDC state parameter (CSRF protection — internal)",
+                type: "string",
+                read: true,
+                write: false,
+                def: "",
             },
             native: {},
         });
@@ -295,6 +403,45 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 native: {},
             });
 
+            await this.setObjectNotExistsAsync(`${prefix}.stream_url`, {
+                type: "state",
+                common: {
+                    name: "Local RTSP URL for RTSPS stream (copy into go2rtc / iobroker.cameras)",
+                    role: "text.url",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.last_motion_at`, {
+                type: "state",
+                common: {
+                    name: "Timestamp of last motion/person/audio event (ISO 8601)",
+                    role: "value.time",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.last_motion_event_type`, {
+                type: "state",
+                common: {
+                    name: "Type of last event: motion / person / audio_alarm",
+                    role: "text",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
             // Set initial values
             await this.upsertState(`${prefix}.name`, cam.name);
             await this.upsertState(`${prefix}.firmware_version`, cam.firmwareVersion);
@@ -397,6 +544,230 @@ class BoschSmartHomeCamera extends utils.Adapter {
         }, refreshIn) as unknown as ioBroker.Timeout | undefined) ?? null;
     }
 
+    // ── Live session management ─────────────────────────────────────────────
+
+    /**
+     * Ensure a fresh live session exists for the given camera ID.
+     *
+     * Caches sessions and reuses them while they are within 75% of their
+     * bufferingTime. Opens a new session (and spawns a TLS proxy) when stale.
+     *
+     * Note: bufferingTimeMs from Bosch is typically 500 ms (LOCAL) or 1000 ms
+     * (REMOTE). We treat it as minimum keepalive time and open a fresh session
+     * on every command if the cached one is more than 30 seconds old — a
+     * conservative threshold that avoids session-expired errors in practice.
+     */
+    private async ensureLiveSession(camId: string): Promise<LiveSession> {
+        const SESSION_TTL_MS = 30_000; // 30 s conservative re-open threshold
+
+        const existing = this._liveSessions.get(camId);
+        if (existing && Date.now() - existing.openedAt < SESSION_TTL_MS) {
+            return existing; // still fresh
+        }
+
+        if (!this._currentAccessToken) {
+            throw new Error(`Cannot open live session for ${camId} — no access token`);
+        }
+
+        // Open a fresh session (AUTO mode: LOCAL first, falls back to REMOTE on network error)
+        const session = await openLiveSession(
+            this._httpClient,
+            this._currentAccessToken,
+            camId,
+            "AUTO",
+        );
+        this._liveSessions.set(camId, session);
+
+        // Spawn (or replace) the TLS proxy for the stream URL
+        try {
+            const existingProxy = this._tlsProxies.get(camId);
+            if (existingProxy) {
+                // Stop old proxy silently before starting a new one
+                await existingProxy.stop().catch(() => undefined);
+                this._tlsProxies.delete(camId);
+            }
+
+            // Derive remote host + port from the session
+            let remoteHost: string;
+            let remotePort: number;
+
+            if (session.connectionType === "LOCAL" && session.lanAddress) {
+                // lanAddress: "192.168.x.x:443"
+                const [h, pStr] = session.lanAddress.split(":");
+                remoteHost = h;
+                remotePort = parseInt(pStr ?? "443", 10);
+            } else {
+                // REMOTE: proxyUrl = "https://proxy-NN:42090/{hash}/snap.jpg?..."
+                // Extract host and port from URL
+                try {
+                    const u = new URL(session.proxyUrl);
+                    remoteHost = u.hostname;
+                    remotePort = u.port ? parseInt(u.port, 10) : 443;
+                } catch {
+                    remoteHost = "residential.cbs.boschsecurity.com";
+                    remotePort = 42090;
+                }
+            }
+
+            const proxyHandle = await startTlsProxy({
+                remoteHost,
+                remotePort,
+                cameraId: camId,
+                log: (level, msg) => this.log[level](msg),
+            });
+            this._tlsProxies.set(camId, proxyHandle);
+
+            // Write stream URL to state
+            await this.setObjectNotExistsAsync(`cameras.${camId}.stream_url`, {
+                type: "state",
+                common: {
+                    name: "Local RTSP URL for RTSPS stream",
+                    role: "text.url",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+            await this.upsertState(`cameras.${camId}.stream_url`, proxyHandle.localRtspUrl);
+            this.log.info(
+                `TLS proxy for camera ${camId.slice(0, 8)}: ` +
+                `stream_url = ${proxyHandle.localRtspUrl}`,
+            );
+        } catch (proxyErr: unknown) {
+            // TLS proxy failure is non-fatal for RCP/snapshot — log and continue
+            const msg = proxyErr instanceof Error ? proxyErr.message : String(proxyErr);
+            this.log.warn(`Could not start TLS proxy for ${camId}: ${msg}`);
+        }
+
+        return session;
+    }
+
+    /**
+     * Derive the rcp.xml base URL from a live session.
+     *
+     * LOCAL:  "https://192.168.x.x:443/rcp.xml"
+     * REMOTE: "https://proxy-NN:42090/{hash}/rcp.xml"
+     */
+    private getRcpUrl(session: LiveSession): string {
+        // proxyUrl is the snap.jpg URL — strip the snap.jpg path and query to get the base
+        // e.g. "https://192.0.2.10:443/snap.jpg?JpegSize=1206" → "https://192.0.2.10:443/rcp.xml"
+        // e.g. "https://proxy-NN:42090/{hash}/snap.jpg?JpegSize=1206" → "https://proxy-NN:42090/{hash}/rcp.xml"
+        try {
+            const u = new URL(session.proxyUrl);
+            // Replace everything after the last '/' before snap.jpg
+            const basePath = u.pathname.replace(/\/snap\.jpg.*$/, "");
+            return `${u.protocol}//${u.host}${basePath}/rcp.xml`;
+        } catch {
+            // Fallback: simple string replacement
+            return session.proxyUrl.replace(/\/snap\.jpg.*$/, "/rcp.xml");
+        }
+    }
+
+    // ── PKCE browser-login helpers ──────────────────────────────────────────
+
+    /**
+     * Generate (or reuse) a PKCE pair, build the Bosch auth URL, and log it.
+     *
+     * The verifier is stored in info.pkce_verifier so it survives restarts —
+     * regenerated only after a successful code exchange or explicit reset.
+     * This prevents "stale verifier" errors when the user copies the URL from
+     * one adapter start and pastes after a second restart.
+     */
+    private async showLoginUrl(): Promise<void> {
+        // Check if we already have a stored verifier (reuse across restarts)
+        const existingVerifier = (await this.getStateAsync("info.pkce_verifier"))?.val as string | undefined;
+        let verifier: string;
+        let challenge: string;
+        let state: string;
+
+        if (existingVerifier && existingVerifier.length > 10) {
+            // Reuse stored verifier — derive challenge from it
+            const { createHash, randomBytes } = await import("crypto");
+            verifier  = existingVerifier;
+            challenge = createHash("sha256").update(verifier).digest("base64url");
+            const existingState = (await this.getStateAsync("info.pkce_state"))?.val as string | undefined;
+            state = (existingState && existingState.length > 4) ? existingState : randomBytes(16).toString("base64url");
+        } else {
+            // Generate a fresh PKCE pair
+            const { randomBytes } = await import("crypto");
+            const pair = generatePkcePair();
+            verifier  = pair.verifier;
+            challenge = pair.challenge;
+            state     = randomBytes(16).toString("base64url");
+            await this.setStateAsync("info.pkce_verifier", verifier, true);
+            await this.setStateAsync("info.pkce_state",    state,    true);
+        }
+
+        const authUrl = buildAuthUrl(challenge, state);
+
+        this.log.info("Login required. Open this URL in your browser and log in to Bosch:");
+        this.log.info(authUrl);
+        this.log.info(
+            "After Bosch redirects you, copy the full redirect URL " +
+            "(https://www.bosch.com/boschcam?code=...&state=...) " +
+            "and paste it into the 'redirect_url' field in Admin UI, then save.",
+        );
+    }
+
+    /**
+     * Exchange a pasted OIDC redirect URL for access + refresh tokens.
+     *
+     * Reads the stored PKCE verifier, extracts the auth code from the URL,
+     * calls Keycloak token endpoint, saves tokens, and clears the paste field.
+     *
+     * @param url  Full redirect URL pasted by the user
+     * @returns TokenResult on success
+     * @throws Error if code extraction or token exchange fails
+     */
+    private async handleRedirectPaste(url: string): Promise<TokenResult> {
+        const code = extractCode(url);
+        if (!code) {
+            throw new Error(
+                "No 'code' parameter found in pasted URL. " +
+                "Make sure to copy the full URL from the browser address bar after Bosch redirects you.",
+            );
+        }
+
+        const verifier = (await this.getStateAsync("info.pkce_verifier"))?.val as string | undefined;
+        if (!verifier || verifier.length < 10) {
+            throw new Error(
+                "No PKCE verifier stored. " +
+                "Please restart the adapter first (without a redirect_url) to generate a login URL, " +
+                "then open that URL in your browser before pasting the redirect URL.",
+            );
+        }
+
+        const tokens = await exchangeCode(this._httpClient, code, verifier);
+        if (!tokens) {
+            throw new Error(
+                "Token exchange returned null (transient network error). " +
+                "Please try again — paste the same redirect URL or generate a new login URL.",
+            );
+        }
+
+        await this.saveTokens(tokens);
+
+        // Clear paste field so it is not re-used on the next adapter restart
+        try {
+            await this.extendForeignObjectAsync(
+                `system.adapter.${this.namespace}`,
+                { native: { redirect_url: "" } as Partial<ioBroker.AdapterConfig> },
+            );
+        } catch {
+            // Non-fatal — log at debug level; the code has been consumed anyway
+            this.log.debug("Could not clear redirect_url in adapter config — non-fatal");
+        }
+
+        // Clear stored PKCE pair (verifier consumed — regenerate fresh on next login)
+        await this.setStateAsync("info.pkce_verifier", "", true);
+        await this.setStateAsync("info.pkce_state",    "", true);
+
+        this.log.info("Login successful — tokens stored. Adapter is now connected.");
+        return tokens;
+    }
+
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
     /**
@@ -408,23 +779,16 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * 4. Create per-camera state tree
      * 5. Set info.connection = true
      * 6. Arm token refresh loop
+     * 7. Start FCM listener (stub → sets info.fcm_active = "stub")
      */
     private async onReady(): Promise<void> {
         this.log.info("Bosch Smart Home Camera adapter starting…");
-
-        // Validate config
-        if (!this.config.username || !this.config.password) {
-            this.log.error("Username and password must be set in the adapter configuration");
-            this.terminate?.("Missing credentials — configure in Admin UI", 11) ??
-                this.log.warn("terminate() not available — adapter will idle");
-            return;
-        }
 
         // Ensure object tree for info/token states
         await this.ensureInfoObjects();
         await this.setStateAsync("info.connection", false, true);
 
-        // ── Step 1: Obtain tokens ──────────────────────────────────────────
+        // ── Step 1: Obtain tokens (PKCE browser flow) ──────────────────────
         let tokens: TokenResult;
         const stored = await this.loadStoredTokens();
 
@@ -434,29 +798,33 @@ class BoschSmartHomeCamera extends utils.Adapter {
             this._currentRefreshToken = stored.refreshToken;
             // Synthesise a minimal TokenResult so we can start the refresh loop
             tokens = {
-                access_token:      stored.accessToken,
-                refresh_token:     stored.refreshToken,
-                expires_in:        Math.max(1, Math.floor((stored.expiresAt - Date.now()) / 1000)),
+                access_token:       stored.accessToken,
+                refresh_token:      stored.refreshToken,
+                expires_in:         Math.max(1, Math.floor((stored.expiresAt - Date.now()) / 1000)),
                 refresh_expires_in: 0,
-                token_type:        "Bearer",
-                scope:             "",
+                token_type:         "Bearer",
+                scope:              "",
             };
         } else {
-            this.log.info("No valid tokens stored — performing fresh login");
-            try {
-                tokens = await loginWithCredentials(
-                    this._httpClient,
-                    this.config.username,
-                    this.config.password,
-                );
-                this.log.info("Login successful");
-                await this.saveTokens(tokens);
-            } catch (err: unknown) {
-                const msg = err instanceof Error ? err.message : String(err);
-                this.log.error(`Login failed: ${msg}`);
+            // No valid tokens — check if user has pasted a redirect URL
+            const pastedUrl = (this.config as ioBroker.AdapterConfig).redirect_url ?? "";
+
+            if (pastedUrl && pastedUrl.includes("code=")) {
+                // Step 2: user pasted callback URL — extract code, exchange for tokens
+                try {
+                    tokens = await this.handleRedirectPaste(pastedUrl);
+                } catch (err: unknown) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    this.log.error(`Login failed: ${msg}`);
+                    await this.setStateAsync("info.connection", false, true);
+                    this.terminate("Login failed — check Admin UI redirect_url field", 11);
+                    return;
+                }
+            } else {
+                // Step 1: no tokens, no pasted URL — generate PKCE pair and show login URL
+                await this.showLoginUrl();
+                // Stay alive in "waiting for setup" mode — user needs to paste URL
                 await this.setStateAsync("info.connection", false, true);
-                this.terminate?.("Login failed — check credentials in Admin UI", 11) ??
-                    this.log.warn("terminate() not available — adapter will idle");
                 return;
             }
         }
@@ -496,12 +864,39 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // ── Step 3: Create state tree ──────────────────────────────────────
         await this.ensureCameraObjects(cameras);
 
+        // Populate in-memory camera cache (used by handlers for Gen1/Gen2 dispatch)
+        this._cameras.clear();
+        for (const cam of cameras) {
+            this._cameras.set(cam.id, cam);
+        }
+
         // Subscribe to all camera states so onStateChange receives user writes
         await this.subscribeStatesAsync("cameras.*");
 
         // ── Step 4: Mark connected + arm refresh loop ──────────────────────
         await this.upsertState("info.connection", true);
         this.scheduleTokenRefresh(tokens.expires_in * 1000);
+
+        // ── Step 5: FCM listener (stub in v0.2.0) ──────────────────────────
+        this._fcmListener = new FcmListener(this._httpClient, tokens.access_token);
+        this._fcmListener.on("motion",      (ev: FcmEventPayload) => { void this.onFcmEvent(ev); });
+        this._fcmListener.on("audio_alarm", (ev: FcmEventPayload) => { void this.onFcmEvent(ev); });
+        this._fcmListener.on("person",      (ev: FcmEventPayload) => { void this.onFcmEvent(ev); });
+
+        try {
+            await this._fcmListener.start();
+            await this.setStateAsync("info.fcm_active", "healthy", true);
+            this.log.info("FCM push listener started");
+        } catch (err: unknown) {
+            if (err instanceof FcmNotImplementedError) {
+                this.log.warn("FCM not implemented yet — using polling fallback in v0.3.0+");
+                await this.setStateAsync("info.fcm_active", "stub", true);
+            } else {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.log.error(`FCM start failed: ${msg}`);
+                await this.setStateAsync("info.fcm_active", "error", true);
+            }
+        }
 
         this.log.info(
             `Bosch Smart Home Camera adapter ready — ${cameras.length} camera(s) active`,
@@ -559,73 +954,221 @@ class BoschSmartHomeCamera extends utils.Adapter {
         }
     }
 
-    // ── Camera command handlers (stubs — real RCP+/snapshot wiring in v0.2.0) ──
+    // ── FCM event handler ───────────────────────────────────────────────────
 
     /**
-     * Privacy mode: RCP+ command 0x0808 via cloud proxy.
-     * Full wiring deferred until live-session URL is available in state tree (v0.2.0).
+     * Handle an FCM motion/person/audio_alarm push event.
+     * Writes per-camera last_motion_at + last_motion_event_type states.
+     */
+    private async onFcmEvent(ev: FcmEventPayload): Promise<void> {
+        const prefix = `cameras.${ev.cameraId}`;
+        await this.setStateAsync(`${prefix}.last_motion_at`, ev.timestamp, true);
+        await this.setStateAsync(`${prefix}.last_motion_event_type`, ev.eventType, true);
+        this.log.info(
+            `FCM event [${ev.eventType}] for camera ${ev.cameraId.slice(0, 8)} at ${ev.timestamp}`,
+        );
+    }
+
+    // ── Camera command handlers ─────────────────────────────────────────────
+
+    /**
+     * Derive Digest credentials from a live session for LOCAL RCP+ calls.
+     * Cloud proxy URLs are pre-authenticated via the URL hash — return undefined
+     * so the REMOTE codepath is taken in sendRcpCommand().
+     */
+    private getRcpAuth(session: LiveSession): { user: string; password: string } | undefined {
+        if (session.connectionType === "LOCAL") {
+            return { user: session.digestUser, password: session.digestPassword };
+        }
+        return undefined;
+    }
+
+    /**
+     * Privacy mode: PUT /v11/video_inputs/{camId}/privacy with
+     * { privacyMode: "ON" | "OFF", durationInSeconds: null }.
+     *
+     * Matches HA's `async_cloud_set_privacy_mode()` in shc.py. Cloud-API path
+     * is the primary (fast ~150ms) and works for both Gen1 + Gen2. RCP+ LOCAL
+     * is NOT used here because Bosch's Gen2 firmware rejects WRITE 0x0808 over
+     * Digest auth (verified live: HTTP 401 even with correct credentials).
      */
     private async handlePrivacyToggle(camId: string, enabled: boolean): Promise<void> {
-        // TODO v0.2.0: const url = await this.getCamProxyUrl(camId);
-        // import { sendRcpCommand, buildSetPrivacyFrame } from "./lib/rcp";
-        // await sendRcpCommand(this._httpClient, url, this._currentAccessToken!, buildSetPrivacyFrame(enabled));
-        this.log.info(`TODO: send RCP+ privacy=${enabled} for ${camId}`);
+        if (!this._currentAccessToken) {
+            throw new Error(`Cannot set privacy for ${camId} — no access token`);
+        }
+        const url = `https://residential.cbs.boschsecurity.com/v11/video_inputs/${camId}/privacy`;
+        const body = { privacyMode: enabled ? "ON" : "OFF", durationInSeconds: null };
+        const resp = await this._httpClient.put(url, body, {
+            headers: {
+                Authorization: `Bearer ${this._currentAccessToken}`,
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            validateStatus: () => true,
+        });
+        if (![200, 201, 204].includes(resp.status)) {
+            throw new Error(`Cloud privacy PUT returned HTTP ${resp.status}`);
+        }
+        this.log.info(`Privacy mode ${enabled ? "ON" : "OFF"} set for camera ${camId.slice(0, 8)}`);
     }
 
     /**
-     * Camera light: RCP+ command 0x099f via cloud proxy.
-     * Full wiring deferred to v0.2.0.
+     * Camera light: Cloud-API PUT, Gen-specific endpoint.
+     *
+     * Gen2: PUT /v11/video_inputs/{id}/lighting/switch/front + /topdown
+     *       with body { enabled: true|false }
+     * Gen1: PUT /v11/video_inputs/{id}/lighting_override
+     *       with body { frontLightOn, wallwasherOn, frontLightIntensity? }
+     *
+     * Matches HA's `async_cloud_set_camera_light()` in shc.py.
      */
     private async handleLightToggle(camId: string, enabled: boolean): Promise<void> {
-        // TODO v0.2.0: real RCP+ call
-        this.log.info(`TODO: send RCP+ light=${enabled} for ${camId}`);
+        if (!this._currentAccessToken) {
+            throw new Error(`Cannot set light for ${camId} — no access token`);
+        }
+        const cam = this._cameras.get(camId);
+        const isGen2 = cam?.generation === 2;
+        const headers = {
+            Authorization: `Bearer ${this._currentAccessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+        };
+
+        if (isGen2) {
+            const base = `https://residential.cbs.boschsecurity.com/v11/video_inputs/${camId}/lighting/switch`;
+            const body = { enabled };
+            const [r1, r2] = await Promise.all([
+                this._httpClient.put(`${base}/front`,   body, { headers, validateStatus: () => true }),
+                this._httpClient.put(`${base}/topdown`, body, { headers, validateStatus: () => true }),
+            ]);
+            const ok1 = [200, 201, 204].includes(r1.status);
+            const ok2 = [200, 201, 204].includes(r2.status);
+            if (!ok1 && !ok2) {
+                throw new Error(`Cloud light PUT Gen2 returned HTTP front=${r1.status} topdown=${r2.status}`);
+            }
+        } else {
+            const url = `https://residential.cbs.boschsecurity.com/v11/video_inputs/${camId}/lighting_override`;
+            const body = enabled
+                ? { frontLightOn: true,  wallwasherOn: true,  frontLightIntensity: 1.0 }
+                : { frontLightOn: false, wallwasherOn: false };
+            const resp = await this._httpClient.put(url, body, { headers, validateStatus: () => true });
+            if (![200, 201, 204].includes(resp.status)) {
+                throw new Error(`Cloud light PUT Gen1 returned HTTP ${resp.status}`);
+            }
+        }
+        this.log.info(`Camera light ${enabled ? "ON" : "OFF"} set for camera ${camId.slice(0, 8)} (gen${isGen2 ? 2 : 1})`);
     }
 
     /**
-     * Image rotation: RCP+ command 0x0810 via cloud proxy.
-     * Full wiring deferred to v0.2.0.
+     * Image rotation: RCP+ command 0x0810 WRITE (Digest for LOCAL, hash for REMOTE).
      */
     private async handleImageRotationToggle(camId: string, rotated180: boolean): Promise<void> {
-        // TODO v0.2.0: real RCP+ call
-        this.log.info(`TODO: send RCP+ image_rotation=${rotated180 ? "180" : "0"} for ${camId}`);
+        const session = await this.ensureLiveSession(camId);
+        const rcpUrl = this.getRcpUrl(session);
+        const frame = buildSetImageRotationFrame(rotated180);
+        await sendRcpCommand(this._httpClient, rcpUrl, frame, undefined, this.getRcpAuth(session));
+        this.log.info(
+            `Image rotation ${rotated180 ? "180°" : "0°"} set for camera ${camId.slice(0, 8)}`,
+        );
     }
 
     /**
-     * Snapshot fetch: downloads JPEG via cloud snapshot URL and writes to adapter data folder.
-     * Full wiring deferred to v0.2.0.
+     * Snapshot fetch: opens a live session, downloads JPEG via snap.jpg URL,
+     * writes to the adapter file-store, and updates cameras.<id>.snapshot_path.
+     *
+     * Bosch cameras frequently abort the first snap.jpg request after a long
+     * idle period with "stream has been aborted" — observed live on Gen2
+     * Outdoor (Terrasse, FW 9.40.25). The second attempt (within ~5s) always
+     * succeeds. We retry once with a short backoff before giving up; mirrors
+     * HA integration's snap.jpg retry pattern.
      */
     private async handleSnapshotTrigger(camId: string): Promise<void> {
-        // TODO v0.2.0:
-        // import { fetchSnapshot, buildSnapshotUrl } from "./lib/snapshot";
-        // const url = buildSnapshotUrl(proxyUrl);
-        // const buf = await fetchSnapshot(this._httpClient, url, this._currentAccessToken!);
-        // await this.writeFileAsync(this.namespace, `cameras/${camId}/snapshot.jpg`, buf);
-        // await this.setStateAsync(`cameras.${camId}.snapshot_path`, `/${this.namespace}/cameras/${camId}/snapshot.jpg`, true);
-        this.log.info(`TODO: fetch snapshot for ${camId}`);
+        const session = await this.ensureLiveSession(camId);
+        const snapUrl = buildSnapshotUrl(session.proxyUrl);
+
+        let buf: Buffer;
+        try {
+            buf = await fetchSnapshot(
+                snapUrl,
+                session.connectionType,
+                session.digestUser,
+                session.digestPassword,
+            );
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            // Only retry on "aborted" / connection-reset errors — not on auth (401)
+            // or non-image content type (no point retrying those).
+            const isTransient = /abort|reset|ECONNRESET|socket hang up|timeout/i.test(msg);
+            if (!isTransient) throw err;
+
+            this.log.debug(`Snapshot retry for ${camId.slice(0, 8)}: ${msg}`);
+            await new Promise((r) => setTimeout(r, 800));
+            buf = await fetchSnapshot(
+                snapUrl,
+                session.connectionType,
+                session.digestUser,
+                session.digestPassword,
+            );
+        }
+
+        const filePath = `cameras/${camId}/snapshot.jpg`;
+        await this.writeFileAsync(this.namespace, filePath, buf);
+        await this.setStateAsync(
+            `cameras.${camId}.snapshot_path`,
+            `/${this.namespace}/${filePath}`,
+            true,
+        );
+        this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
     }
 
     /**
      * Called when the adapter is stopped.
-     * Clears the refresh timer and sets info.connection = false.
+     * Cleans up TLS proxies, FCM listener, live sessions, and the refresh timer.
      * Must always call callback() — ioBroker enforces a timeout.
      */
     private onUnload(callback: () => void): void {
-        try {
-            // Clear the refresh timer (this.clearTimeout auto-tracks via adapter-core)
-            if (this._refreshTimeout) {
-                this.clearTimeout(this._refreshTimeout);
-                this._refreshTimeout = null;
+        void (async () => {
+            try {
+                // Clear the refresh timer (this.clearTimeout auto-tracks via adapter-core)
+                if (this._refreshTimeout) {
+                    this.clearTimeout(this._refreshTimeout);
+                    this._refreshTimeout = null;
+                }
+
+                // Stop FCM listener
+                if (this._fcmListener) {
+                    try { await this._fcmListener.stop(); } catch { /* best-effort */ }
+                    this._fcmListener = null;
+                }
+
+                // Stop all TLS proxies
+                for (const [, handle] of this._tlsProxies) {
+                    try { await handle.stop(); } catch { /* best-effort */ }
+                }
+                this._tlsProxies.clear();
+
+                // Close all live sessions (best-effort — camera may be gone)
+                if (this._currentAccessToken) {
+                    const token = this._currentAccessToken;
+                    for (const [camId] of this._liveSessions) {
+                        try {
+                            await closeLiveSession(this._httpClient, token, camId);
+                        } catch { /* best-effort */ }
+                    }
+                }
+                this._liveSessions.clear();
+
+                // Best-effort connection flag (async — may not complete if ioBroker kills us)
+                void this.setStateAsync("info.connection", false, true).catch(() => undefined);
+                void this.setStateAsync("info.fcm_active", "stopped", true).catch(() => undefined);
+
+                this.log.info("Bosch Smart Home Camera adapter stopped");
+            } catch {
+                // swallow — we must always call callback
+            } finally {
+                callback();
             }
-
-            // Synchronous best-effort connection flag (async not guaranteed to complete)
-            void this.setStateAsync("info.connection", false, true).catch(() => undefined);
-
-            this.log.info("Bosch Smart Home Camera adapter stopped");
-        } catch {
-            // swallow — we must always call callback
-        } finally {
-            callback();
-        }
+        })();
     }
 }
 

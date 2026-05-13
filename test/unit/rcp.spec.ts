@@ -257,7 +257,7 @@ describe("sendRcpCommand()", () => {
         const params = buildSetPrivacyFrame(true);
         const result = await sendRcpCommand(
             axios as unknown as Parameters<typeof sendRcpCommand>[0],
-            "http://192.168.20.149/rcp.xml",
+            "http://192.0.2.10/rcp.xml",
             params,
         );
 
@@ -272,7 +272,7 @@ describe("sendRcpCommand()", () => {
         try {
             await sendRcpCommand(
                 axios as unknown as Parameters<typeof sendRcpCommand>[0],
-                "http://192.168.20.149/rcp.xml",
+                "http://192.0.2.10/rcp.xml",
                 params,
             );
             expect.fail("should have thrown");
@@ -290,7 +290,7 @@ describe("sendRcpCommand()", () => {
         try {
             await sendRcpCommand(
                 axios as unknown as Parameters<typeof sendRcpCommand>[0],
-                "http://192.168.20.149/rcp.xml",
+                "http://192.0.2.10/rcp.xml",
                 params,
             );
             expect.fail("should have thrown");

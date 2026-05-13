@@ -161,20 +161,31 @@ export declare function buildSetImageRotationFrame(rotated180: boolean): RcpPara
  * Mirrors Python rcp_read(hass, rcp_base, "0x099e", session_id).
  */
 export declare function buildGetSnapshotFrame(): RcpParams;
+/** Optional Digest auth credentials for LOCAL RCP calls. */
+export interface RcpAuth {
+    user: string;
+    password: string;
+}
 /**
  * Send an RCP command to the /rcp.xml endpoint and return the parsed response.
  *
  * Mirrors Python rcp_local_read() for the local path and rcp_read() for the
  * cloud proxy path. Uses axios so callers can inject a mock for testing.
  *
- * @param httpClient  Axios instance (allows injection for testing)
- * @param baseUrl     Full URL to rcp.xml, e.g. "http://192.168.20.149/rcp.xml"
+ * When `auth` is provided, performs a Digest-authenticated request via the
+ * helper in digest.ts (two-step 401 challenge → authenticated GET). LOCAL cams
+ * (both Gen1 and Gen2) require Digest on /rcp.xml. The cloud proxy URL is
+ * pre-authenticated via the URL hash and must be called WITHOUT auth.
+ *
+ * @param httpClient  Axios instance (used for the no-auth code path)
+ * @param baseUrl     Full URL to rcp.xml, e.g. "https://192.0.2.10:443/rcp.xml"
  *                    or "https://proxy-01.live.cbs.boschsecurity.com:42090/{hash}/rcp.xml"
  * @param params      RCP params from buildRcpFrame() or the specific builders
  * @param timeoutMs   Request timeout in milliseconds (default 5000)
+ * @param auth        Optional Digest credentials — required for LOCAL connection type
  * @returns           Parsed RcpResponse, or null if the server returned non-200
  * @throws RcpError   if the camera returned <err>
  * @throws RcpNetworkError on HTTP error or network failure
  */
-export declare function sendRcpCommand(httpClient: AxiosInstance, baseUrl: string, params: RcpParams, timeoutMs?: number): Promise<RcpResponse>;
+export declare function sendRcpCommand(httpClient: AxiosInstance, baseUrl: string, params: RcpParams, timeoutMs?: number, auth?: RcpAuth): Promise<RcpResponse>;
 //# sourceMappingURL=rcp.d.ts.map

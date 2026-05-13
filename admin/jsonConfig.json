@@ -2,32 +2,67 @@
   "type": "tabs",
   "items": {
     "tab_connection": {
-      "type": "tab",
+      "type": "panel",
       "label": "Connection",
       "items": {
-        "username": {
-          "type": "text",
-          "label": "Bosch Account (Email)",
-          "help": "Your Bosch SingleKey ID email address",
-          "sm": 12,
-          "md": 6
+        "_info_step1": {
+          "type": "header",
+          "text": {
+            "en": "Step 1: Open the Bosch login URL in your browser",
+            "de": "Schritt 1: Bosch-Login-URL im Browser öffnen"
+          },
+          "size": 5,
+          "sm": 12
         },
-        "password": {
-          "type": "password",
-          "label": "Password",
-          "help": "Your Bosch SingleKey ID password",
+        "_login_instructions": {
+          "type": "staticText",
+          "text": {
+            "en": "The login URL is printed automatically into the adapter log on every start. Find it in ioBroker → Log Inspector (filter by 'bosch-smart-home-camera') — look for the line starting with 'Login required. Open this URL in your browser…'. Copy that URL, open it in your browser, log in to your Bosch account (solve any captcha/MFA). Bosch then redirects your browser to https://www.bosch.com/boschcam?code=XXX&state=YYY — copy that full URL from the browser address bar.",
+            "de": "Die Login-URL wird bei jedem Adapter-Start automatisch ins Log geschrieben. Zu finden in ioBroker → Log Inspector (Filter 'bosch-smart-home-camera') — die Zeile beginnt mit 'Login required. Open this URL in your browser…'. Diese URL kopieren, im Browser öffnen und mit dem Bosch-Konto einloggen (Captcha/MFA lösen). Bosch leitet dich anschließend zu https://www.bosch.com/boschcam?code=XXX&state=YYY weiter — diese vollständige URL aus der Adressleiste des Browsers kopieren."
+          },
+          "newLine": true,
+          "sm": 12
+        },
+        "_info_step2": {
+          "type": "header",
+          "text": {
+            "en": "Step 2: Paste the redirect URL",
+            "de": "Schritt 2: Redirect-URL einfügen"
+          },
+          "size": 5,
+          "newLine": true,
+          "sm": 12
+        },
+        "redirect_url": {
+          "type": "text",
+          "label": {
+            "en": "Pasted callback URL (https://www.bosch.com/boschcam?code=...)",
+            "de": "Eingefügte Callback-URL (https://www.bosch.com/boschcam?code=...)"
+          },
+          "help": {
+            "en": "Paste the full URL from the browser address bar after Bosch redirects you. Leave empty if you haven't logged in yet — the adapter will log the login URL on startup.",
+            "de": "Vollständige URL aus der Browser-Adressleiste nach der Bosch-Weiterleitung einfügen. Leer lassen, wenn noch kein Login erfolgt ist — der Adapter gibt die Login-URL beim Start im Log aus."
+          },
+          "newLine": true,
           "sm": 12,
-          "md": 6
+          "trim": true
         },
         "region": {
           "type": "select",
-          "label": "Region",
-          "help": "Bosch cloud region (EU for Europe)",
+          "label": {
+            "en": "Region",
+            "de": "Region"
+          },
+          "help": {
+            "en": "Bosch cloud region (EU for Europe)",
+            "de": "Bosch-Cloud-Region (EU für Europa)"
+          },
           "default": "EU",
           "options": [
             { "label": "Europe (EU)", "value": "EU" },
             { "label": "United States (US)", "value": "US" }
           ],
+          "newLine": true,
           "sm": 12,
           "md": 4
         }

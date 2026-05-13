@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "news": {
+      "0.2.0": {
+        "en": "Snapshot, switches and stream URL wired: privacy/light/rotation RCP+ commands work, snapshot trigger fetches JPEG into adapter file-store, per-camera RTSP stream URL via local TLS proxy, FCM stub sets info.fcm_active=stub (real push in v0.3.0).",
+        "de": "Snapshot, Schalter und Stream-URL verdrahtet: Datenschutz-/Licht-/Rotations-RCP+-Befehle funktionieren, Snapshot-Trigger lädt JPEG in den Adapter-Datenspeicher, RTSP-Stream-URL pro Kamera via lokalem TLS-Proxy, FCM-Stub setzt info.fcm_active=stub (echter Push in v0.3.0).",
+        "ru": "Снимок, переключатели и URL потока подключены: команды RCP+ конфиденциальности/света/поворота работают, триггер снимка загружает JPEG в хранилище файлов адаптера, URL потока RTSP для каждой камеры через локальный TLS-прокси, заглушка FCM устанавливает info.fcm_active=stub (реальный push в v0.3.0).",
+        "pt": "Snapshot, switches e URL de stream conectados: comandos RCP+ de privacidade/luz/rotação funcionam, gatilho de snapshot busca JPEG para armazenamento de arquivo do adaptador, URL de stream RTSP por câmera via proxy TLS local, stub FCM define info.fcm_active=stub (push real em v0.3.0).",
+        "nl": "Snapshot, schakelaars en stream-URL verbonden: privacy-/licht-/rotatie-RCP+-opdrachten werken, snapshot-trigger haalt JPEG op naar adapter-bestandsopslag, RTSP-stream-URL per camera via lokale TLS-proxy, FCM-stub stelt info.fcm_active=stub in (echte push in v0.3.0).",
+        "fr": "Snapshot, interrupteurs et URL de flux câblés : les commandes RCP+ confidentialité/lumière/rotation fonctionnent, le déclencheur de snapshot récupère le JPEG dans le stockage de fichiers de l'adaptateur, l'URL de flux RTSP par caméra via proxy TLS local, le stub FCM définit info.fcm_active=stub (vrai push dans v0.3.0).",
+        "it": "Snapshot, switch e URL stream collegati: i comandi RCP+ privacy/luce/rotazione funzionano, il trigger snapshot recupera JPEG nell'archivio file dell'adattatore, URL stream RTSP per telecamera tramite proxy TLS locale, stub FCM imposta info.fcm_active=stub (push reale in v0.3.0).",
+        "es": "Snapshot, interruptores y URL de stream conectados: los comandos RCP+ de privacidad/luz/rotación funcionan, el disparador de snapshot obtiene JPEG en el almacenamiento de archivos del adaptador, URL de stream RTSP por cámara mediante proxy TLS local, el stub FCM establece info.fcm_active=stub (push real en v0.3.0).",
+        "pl": "Snapshot, przełączniki i URL strumienia podłączone: polecenia RCP+ prywatności/światła/obrotu działają, wyzwalacz migawki pobiera JPEG do magazynu plików adaptera, URL strumienia RTSP na kamerę przez lokalny proxy TLS, stub FCM ustawia info.fcm_active=stub (prawdziwy push w v0.3.0).",
+        "uk": "Знімок, перемикачі та URL потоку підключені: команди RCP+ конфіденційності/світла/обертання працюють, тригер знімка завантажує JPEG у сховище файлів адаптера, URL потоку RTSP для кожної камери через локальний TLS-проксі, заглушка FCM встановлює info.fcm_active=stub (реальний push у v0.3.0).",
+        "zh-cn": "快照、开关和流URL已接通：隐私/灯光/旋转RCP+命令生效，快照触发器将JPEG下载到适配器文件存储，每个摄像头通过本地TLS代理提供RTSP流URL，FCM存根设置info.fcm_active=stub（真正的推送在v0.3.0中）。"
+      },
       "0.1.0": {
         "en": "First functional release — programmatic OAuth login via Bosch SingleKey ID, camera discovery via /v11/video_inputs, token auto-refresh loop, info.* state tree. Library code for RCP+ protocol (rcp.ts) and snap.jpg fetcher (snapshot.ts) included as preview — switches and snapshots wire up in v0.2.0.",
         "de": "Erste funktionale Version — programmatischer OAuth-Login via Bosch SingleKey ID, Kamera-Discovery via /v11/video_inputs, Token-Auto-Refresh-Loop, info.* State-Tree. Library-Code für RCP+-Protokoll (rcp.ts) und Snap.jpg-Fetcher (snapshot.ts) als Preview enthalten — Schalter und Snapshots werden in v0.2.0 verdrahtet.",
@@ -84,10 +97,13 @@
         "js-controller": ">=5.0.19"
       }
     ],
-    "encryptedNative": ["password"],
-    "protectedNative": ["password"]
+    "encryptedNative": [],
+    "protectedNative": []
   },
-  "native": {},
+  "native": {
+    "redirect_url": "",
+    "region": "EU"
+  },
   "instanceObjects": [
     {
       "_id": "info",
@@ -158,6 +174,19 @@
         "write": false,
         "def": 0,
         "unit": "s"
+      },
+      "native": {}
+    },
+    {
+      "_id": "info.fcm_active",
+      "type": "state",
+      "common": {
+        "role": "indicator.status",
+        "name": "FCM push listener status: healthy / stub / error / stopped",
+        "type": "string",
+        "read": true,
+        "write": false,
+        "def": "stub"
       },
       "native": {}
     },

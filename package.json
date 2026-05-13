@@ -1,6 +1,6 @@
 {
   "name": "iobroker.bosch-smart-home-camera",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360°, Gen2 Indoor II/Outdoor II)",
   "author": {
     "name": "mosandlt",
@@ -25,7 +25,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -39,7 +39,9 @@
   },
   "dependencies": {
     "@iobroker/adapter-core": "^3.2.2",
-    "axios": "^1.9.0"
+    "axios": "^1.9.0",
+    "axios-cookiejar-support": "^7.0.0",
+    "tough-cookie": "^6.0.1"
   },
   "devDependencies": {
     "@alcalzone/release-script": "^5.2.0",
@@ -52,6 +54,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.14.1",
     "@types/sinon": "^17.0.4",
+    "@types/tough-cookie": "^4.0.5",
     "@typescript-eslint/eslint-plugin": "^8.29.1",
     "@typescript-eslint/parser": "^8.29.1",
     "chai": "^4.5.0",

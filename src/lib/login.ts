@@ -1,23 +1,46 @@
 /**
- * Programmatic OAuth2 Login for Bosch SingleKey ID (Keycloak)
+ * @deprecated  Programmatic login is BLOCKED in production by hCaptcha on singlekey-id.com.
+ *              main.ts no longer calls loginWithCredentials().
+ *              This file is kept for tests / future captcha-solver paths only.
+ *              The active login path is: Browser PKCE + paste redirect URL (main.ts handleRedirectPaste).
  *
- * Implements the end-to-end username/password login flow without browser interaction.
+ * Programmatic OAuth2 Login for Bosch SingleKey ID
+ *
+ * Implements the end-to-end 2-step username/password login flow without
+ * browser interaction.
  *
  * Flow:
  *   1. generatePkcePair() + buildAuthUrl()
- *   2. GET auth URL → Keycloak returns HTML login form with action= URL
- *   3. Extract form action URL from HTML (regex match on <form ...action="...">)
- *   4. POST username + password to form action URL (with session cookie)
- *      - Keycloak 302 redirect to REDIRECT_URI?code=... → success
- *      - Keycloak 302 to MFA page (no code param) → MfaRequiredError
- *      - Keycloak 200 (HTML with error msg, no redirect) → InvalidCredentialsError
- *   5. Extract code from Location header
- *   6. exchangeCode() → TokenResult
+ *   2. GET auth URL → Bosch Keycloak → 303 broker/skid-p → 303 singlekey-id.com
+ *      → 302 chain → singlekey-id.com/en-gb/login?ReturnUrl=... (email page)
+ *      Cookie jar persists session cookies across all redirect hops.
+ *   3. Extract CSRF + returnPath from email page (form has NO action attr → post to page URL)
+ *   4. POST email to same URL → singlekey-id.com returns password page (200)
+ *      ⚠ hCaptcha guard: the "Continue" button is disabled by JS until captcha is solved.
+ *        Without a valid h-captcha-response the server returns the email page again.
+ *        Detected via: page title is still "Welcome" / no PasswordInput field found.
+ *   5. Extract password form action + new CSRF from password page
+ *   6. POST password → Bosch Keycloak callback → 302 to REDIRECT_URI?code=...
+ *   7. Extract code from final URL
+ *   8. exchangeCode() → TokenResult
+ *
+ * hCaptcha blocker (discovered 2026-05-13):
+ *   singlekey-id.com enforces hCaptcha (sitekey f8fe2d56-ad42-4f44-b9fe-5b30fcb0dd38)
+ *   on the email→password step. The submit button is disabled by default; JS enables it
+ *   only after the hCaptcha widget fires its callback. POSTing without a real
+ *   h-captcha-response token causes the server to silently return the same email page.
+ *   → MfaRequiredError is thrown until a captcha-solving path is added.
  *
  * Cookie handling:
- *   Keycloak sets a session cookie (KC_RESTART / AUTH_SESSION_ID) on the GET.
- *   This cookie must be sent back with the POST — otherwise Keycloak rejects the
- *   request. We extract Set-Cookie headers from the GET response and relay them.
+ *   singlekey-id.com sets .AspNetCore.Antiforgery.* + SKI_session cookies.
+ *   Without a persistent cookie jar all POSTs fail with CSRF validation errors (400).
+ *   We use tough-cookie + axios-cookiejar-support for automatic cross-redirect
+ *   cookie persistence.
+ *
+ * Password field name:
+ *   Traced as `Password.PasswordInput.StringValue` (consistent with the email field naming
+ *   convention `UserIdentifierInput.EmailInput.StringValue`). Could not be confirmed
+ *   server-side because hCaptcha prevents reaching the password page headlessly.
  *
  * References:
  *   Python CLI get_token.py: _pkce_pair, _build_auth_url, _exchange_code
@@ -25,6 +48,8 @@
  */
 
 import axios, { type AxiosInstance } from "axios";
+import { CookieJar } from "tough-cookie";
+import { wrapper } from "axios-cookiejar-support";
 
 import {
     generatePkcePair,
@@ -37,7 +62,7 @@ import * as crypto from "crypto";
 
 // ── Error classes ─────────────────────────────────────────────────────────────
 
-/** Thrown when Keycloak rejects username/password (200 response with error HTML, no redirect). */
+/** Thrown when SingleKey ID rejects username or password. */
 export class InvalidCredentialsError extends Error {
     constructor(message = "Invalid credentials") {
         super(message);
@@ -45,7 +70,12 @@ export class InvalidCredentialsError extends Error {
     }
 }
 
-/** Thrown when Keycloak demands an MFA / interactive step (302 to a page without a code). */
+/**
+ * Thrown when the login flow requires interactive verification:
+ * - hCaptcha on the email page (headless blocker as of 2026-05-13)
+ * - MFA / 2FA challenge
+ * - Additional account verification
+ */
 export class MfaRequiredError extends Error {
     constructor(message = "MFA or additional verification required") {
         super(message);
@@ -64,39 +94,64 @@ export class LoginFlowError extends Error {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
- * Extract the Keycloak login form action URL from the auth page HTML.
+ * Parse a form's POST target URL and its CSRF token.
  *
- * Keycloak renders a <form ... action="https://..."> on its login page.
- * The action URL is the direct POST endpoint for username/password.
+ * SingleKey ID uses ASP.NET Core Razor Pages:
+ * - The main email/password forms have NO action attribute → POST goes to same URL.
+ * - A language-switcher form at the bottom has action="/en-gb/language".
+ * - We want the first form without an action (or with a relative action that matches
+ *   the login path), NOT the language form.
  *
- * @param html  Raw HTML of the Keycloak login page
- * @returns The action URL, or null if not found
+ * @param html     Raw HTML of the page
+ * @param pageUrl  Current page URL (used when form has no action attribute)
+ * @returns Resolved action URL and CSRF token (or nulls if not found)
  */
-export function extractFormAction(html: string): string | null {
-    // Match <form ... action="<url>"> — Keycloak may have extra attributes before action
-    // and the URL may contain HTML entities like &amp; which we must decode.
-    const match = html.match(/<form[^>]+action="([^"]+)"/i);
-    if (!match) {
-        return null;
+export function parseFormFields(
+    html: string,
+    pageUrl: string,
+): { action: string | null; csrf: string | null } {
+    // Find the first form that either has no action OR has a login-path action.
+    // The language-switcher form always has action="/en-gb/language" → skip it.
+    const formMatches = [...html.matchAll(/<form[^>]*>/gi)];
+    let action: string | null = null;
+
+    for (const m of formMatches) {
+        const formTag = m[0];
+        const actionMatch = formTag.match(/action="([^"]+)"/i);
+        if (!actionMatch) {
+            // No action attr → form POSTs to current URL
+            action = pageUrl;
+            break;
+        }
+        const rawAction = actionMatch[1].replace(/&amp;/g, "&");
+        // Skip the language switcher and similar utility forms
+        if (/\/language$|\/language\?/i.test(rawAction)) {
+            continue;
+        }
+        // Any other action URL: resolve relative against base
+        try {
+            action = new URL(rawAction, pageUrl).toString();
+        } catch {
+            action = null;
+        }
+        break;
     }
-    // Decode HTML entities (&amp; → &, etc.)
-    return match[1]
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
+
+    // Extract the first CSRF token (they are typically duplicated 3× on the page)
+    const csrfMatch = html.match(/name="__RequestVerificationToken"[^>]+value="([^"]+)"/i);
+    const csrf = csrfMatch?.[1] ?? null;
+
+    return { action, csrf };
 }
 
 /**
- * Extract the authorization code from a redirect Location header.
+ * Extract the authorization code from a full redirect URL (query string).
  *
- * @param location  The Location header value from a 302 response
+ * @param location  Full URL (after following redirects to the OIDC callback)
  * @returns The code query parameter, or null if not present
  */
 export function extractCodeFromLocation(location: string): string | null {
     try {
-        // Location may be a full URL or a relative path — handle both
         const url = location.startsWith("http")
             ? new URL(location)
             : new URL(`https://placeholder.invalid${location.startsWith("/") ? "" : "/"}${location}`);
@@ -110,35 +165,51 @@ export function extractCodeFromLocation(location: string): string | null {
 }
 
 /**
- * Build a cookie header string from a Set-Cookie response header value.
- * Extracts only the name=value pairs, discarding Path/HttpOnly/Secure directives.
- *
- * @param setCookieHeaders  Array of Set-Cookie header strings
- * @returns Cookie header value suitable for the next request
+ * Detect hCaptcha / reCAPTCHA on a page.
+ * SingleKey ID uses hCaptcha (sitekey f8fe2d56-...) on the email submit button.
  */
-function buildCookieHeader(setCookieHeaders: string | string[] | undefined): string {
-    if (!setCookieHeaders) return "";
-    const headers = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders];
-    return headers
-        .map((h) => h.split(";")[0].trim())  // keep only name=value, strip directives
-        .filter(Boolean)
-        .join("; ");
+export function detectCaptcha(html: string): boolean {
+    return /h-captcha|recaptcha|g-recaptcha|data-sitekey/i.test(html);
+}
+
+/**
+ * Detect MFA / 2FA challenge page.
+ */
+export function detectMfa(html: string): boolean {
+    return /enter (verification|authentication) code|two-factor|authenticator app|verify your identity/i.test(html);
+}
+
+// Keep the old extractFormAction export for backward-compatibility with existing tests
+// (tests that stub a Keycloak-style form with explicit action= still pass).
+export function extractFormAction(html: string): string | null {
+    const match = html.match(/<form[^>]+action="([^"]+)"/i);
+    if (!match) return null;
+    return match[1]
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
- * End-to-end programmatic OAuth login for Bosch SingleKey ID (Keycloak).
+ * End-to-end programmatic OAuth2 login for Bosch SingleKey ID.
  *
- * Requires no browser. Submits username + password directly to the Keycloak
- * login form and captures the auth code from the redirect Location header.
+ * 2-step flow: POST email → POST password → capture OIDC code → exchange tokens.
  *
- * @param httpClient  Axios instance (injected for testability)
+ * ⚠ hCaptcha blocker: As of 2026-05-13, singlekey-id.com enforces hCaptcha on the
+ * email submission step. This function correctly detects the captcha and throws
+ * MfaRequiredError("hCaptcha required..."). No programmatic bypass is implemented.
+ * The ioBroker Admin UI should guide the user to authenticate via browser link.
+ *
+ * @param httpClient  Axios instance (timeout + TLS settings inherited)
  * @param username    Bosch SingleKey ID email address
  * @param password    Bosch SingleKey ID password
- * @returns TokenResult (access_token, refresh_token, ...) on success
- * @throws InvalidCredentialsError  — wrong username or password
- * @throws MfaRequiredError         — account requires MFA / additional verification
+ * @returns TokenResult on success
+ * @throws InvalidCredentialsError  — email or password rejected
+ * @throws MfaRequiredError         — hCaptcha / MFA / interactive step required
  * @throws LoginFlowError           — network errors, server errors, parsing failures
  */
 export async function loginWithCredentials(
@@ -146,112 +217,226 @@ export async function loginWithCredentials(
     username: string,
     password: string,
 ): Promise<TokenResult> {
-    // Step 1: Generate PKCE pair and build auth URL
+    // Step 1: PKCE + auth URL
     const { verifier, challenge } = generatePkcePair();
     const state = crypto.randomBytes(16).toString("base64url");
     const authUrl = buildAuthUrl(challenge, state);
 
-    // Step 2: GET auth URL → HTML login form
-    let getRespData: string;
-    let getRespCookies: string | string[] | undefined;
+    // Cookie jar: persists .AspNetCore.Antiforgery + SKI_session cookies
+    // across all redirect hops on singlekey-id.com.
+    const jar = new CookieJar();
+    const jarClient = wrapper(axios.create({
+        timeout: httpClient.defaults.timeout ?? 15_000,
+        headers: {
+            "User-Agent": "iobroker.bosch-smart-home-camera/0.2.0",
+        },
+        httpsAgent: httpClient.defaults.httpsAgent,
+        jar,
+        withCredentials: true,
+        maxRedirects: 15,  // Bosch auth chain has 7+ hops
+    }));
+
+    // ── Step 2: GET email page ───────────────────────────────────────────────
+    let emailPageUrl: string;
+    let emailHtml: string;
+
     try {
-        const getResp = await httpClient.get<string>(authUrl, {
-            maxRedirects: 5,  // follow Keycloak's own internal redirects (session init)
+        const emailPageResp = await jarClient.get<string>(authUrl, {
             headers: { Accept: "text/html" },
             responseType: "text",
         });
-        if (getResp.status >= 500) {
-            throw new LoginFlowError(`Keycloak GET auth page HTTP ${getResp.status}`);
+        if (emailPageResp.status >= 500) {
+            throw new LoginFlowError(`Auth server error HTTP ${emailPageResp.status}`);
         }
-        getRespData = getResp.data;
-        // axios normalizes headers to AxiosResponseHeaders; read set-cookie directly
-        getRespCookies = getResp.headers["set-cookie"] as string | string[] | undefined;
+        // After following redirects, request.res.responseUrl is the final URL
+        emailPageUrl = (emailPageResp.request as { res?: { responseUrl?: string } })
+            ?.res?.responseUrl ?? authUrl;
+        emailHtml = emailPageResp.data as string;
     } catch (err: unknown) {
         if (err instanceof LoginFlowError) throw err;
         if (axios.isAxiosError(err)) {
             const status = err.response?.status;
+            if (status === 400) {
+                throw new LoginFlowError(
+                    `Auth page returned HTTP 400: ${JSON.stringify(err.response?.data ?? "").slice(0, 200)}`,
+                );
+            }
             if (status !== undefined && status >= 500) {
-                throw new LoginFlowError(`Keycloak GET auth page HTTP ${status}`);
+                throw new LoginFlowError(`Auth server HTTP ${status}`);
             }
             throw new LoginFlowError(`Network error fetching auth page: ${(err as Error).message}`);
         }
         throw new LoginFlowError(`Unexpected error fetching auth page: ${String(err)}`);
     }
 
-    // Step 3: Extract form action URL from HTML
-    const formAction = extractFormAction(getRespData);
-    if (!formAction) {
-        throw new LoginFlowError("Could not find login form action URL in Keycloak response");
-    }
-
-    // Collect session cookies from GET response (required for POST)
-    const cookieHeader = buildCookieHeader(getRespCookies);
-
-    // Step 4: POST username + password to form action URL
-    const formBody = new URLSearchParams({
-        username,
-        password,
-    });
-
-    let postStatus: number;
-    let postLocation: string | undefined;
-
-    try {
-        const postResp = await httpClient.post<string>(formAction, formBody.toString(), {
-            maxRedirects: 0,  // do NOT follow — we need to inspect the 302 Location
-            headers: {
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "text/html,application/xhtml+xml",
-                ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-            },
-            responseType: "text",
-            validateStatus: (s) => s < 600,  // accept any status to inspect it ourselves
-        });
-        postStatus = postResp.status;
-        postLocation = postResp.headers["location"] as string | undefined;
-
-        // If status 200 with HTML: wrong password (Keycloak shows an error page instead of redirecting)
-        if (postStatus === 200) {
-            throw new InvalidCredentialsError("Username or password is incorrect");
-        }
-
-        // 5xx from POST → server outage
-        if (postStatus >= 500) {
-            throw new LoginFlowError(`Keycloak POST HTTP ${postStatus}`);
-        }
-    } catch (err: unknown) {
-        // Re-throw our own typed errors (InvalidCredentialsError, LoginFlowError)
-        if (err instanceof InvalidCredentialsError || err instanceof LoginFlowError) {
-            throw err;
-        }
-        if (axios.isAxiosError(err)) {
-            // axios throws on non-2xx when validateStatus is not set — but we set it above.
-            // This path is only reached for network/timeout errors.
-            throw new LoginFlowError(`Network error during credentials POST: ${(err as Error).message}`);
-        }
-        throw new LoginFlowError(`Unexpected error during credentials POST: ${String(err)}`);
-    }
-
-    // Step 5: Extract auth code from redirect Location
-    if (!postLocation) {
-        throw new LoginFlowError("No Location header in Keycloak POST response");
-    }
-
-    const code = extractCodeFromLocation(postLocation);
-
-    if (!code) {
-        // 302 but no code param → MFA page or unknown challenge
-        throw new MfaRequiredError(
-            `Keycloak redirected without auth code (Location: ${postLocation.substring(0, 120)})`,
+    // ── Step 3: Parse email form ─────────────────────────────────────────────
+    const emailForm = parseFormFields(emailHtml, emailPageUrl);
+    if (!emailForm.action || !emailForm.csrf) {
+        throw new LoginFlowError(
+            "Email page: could not find form action or CSRF token — page structure changed",
         );
     }
 
-    // Step 6: Exchange code for tokens
-    const tokens = await exchangeCode(httpClient, code, verifier);
+    // ── Step 4: POST email ───────────────────────────────────────────────────
+    // Extract returnPath value (needed by SingleKey ID to re-render the correct form state)
+    const returnPathMatch = emailHtml.match(/name="returnPath"[^>]+value="([^"]*)"/i);
+    const returnPath = returnPathMatch?.[1]?.replace(/&amp;/g, "&") ?? "";
 
+    const emailBody = new URLSearchParams({
+        "UserIdentifierInput.EmailInput.StringValue": username,
+        "__RequestVerificationToken": emailForm.csrf,
+        "credential": "",
+        "returnPath": returnPath,
+    });
+
+    let passwordPageUrl: string;
+    let passwordHtml: string;
+
+    try {
+        const passwordPageResp = await jarClient.post<string>(
+            emailForm.action,
+            emailBody.toString(),
+            {
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                responseType: "text",
+            },
+        );
+
+        if (passwordPageResp.status >= 500) {
+            throw new LoginFlowError(`Email POST HTTP ${passwordPageResp.status}`);
+        }
+        if (passwordPageResp.status >= 400) {
+            throw new LoginFlowError(`Email POST rejected HTTP ${passwordPageResp.status}`);
+        }
+
+        passwordPageUrl = (passwordPageResp.request as { res?: { responseUrl?: string } })
+            ?.res?.responseUrl ?? emailForm.action;
+        passwordHtml = passwordPageResp.data as string;
+    } catch (err: unknown) {
+        if (err instanceof LoginFlowError) throw err;
+        if (axios.isAxiosError(err)) {
+            const status = err.response?.status;
+            if (status !== undefined && status >= 500) {
+                throw new LoginFlowError(`Email POST HTTP ${status}`);
+            }
+            throw new LoginFlowError(`Network error during email POST: ${(err as Error).message}`);
+        }
+        throw new LoginFlowError(`Unexpected error during email POST: ${String(err)}`);
+    }
+
+    // ── Step 5: Detect hCaptcha / email rejected / MFA ───────────────────────
+    // If we're still on the email page (no PasswordInput field) → hCaptcha or invalid email.
+    // SingleKey ID returns 200 with the same email form when:
+    //   (a) h-captcha-response is missing/invalid (most common headless case)
+    //   (b) The email address is not registered
+    // We can distinguish by checking whether the email was pre-filled in the response.
+    const isStillOnEmailPage = !passwordHtml.includes("PasswordInput") &&
+        (passwordPageUrl.includes("/login") || passwordPageUrl.includes("/en-gb/login"));
+
+    if (isStillOnEmailPage) {
+        // Check whether the email was bounced (pre-filled email indicates accepted, captcha needed)
+        const emailPreFilled = passwordHtml.includes(username);
+        if (emailPreFilled && detectCaptcha(passwordHtml)) {
+            throw new MfaRequiredError(
+                "hCaptcha required on email page — headless programmatic login is blocked by " +
+                "singlekey-id.com. Use the browser-based login URL in the ioBroker Admin UI.",
+            );
+        }
+        // Email not pre-filled → email was rejected (not registered or invalid)
+        throw new InvalidCredentialsError(
+            "Email rejected by Bosch SingleKey ID — check your email address",
+        );
+    }
+
+    if (detectMfa(passwordHtml)) {
+        throw new MfaRequiredError("MFA/2FA required for this account");
+    }
+
+    if (detectCaptcha(passwordHtml) && !passwordHtml.includes("PasswordInput")) {
+        throw new MfaRequiredError("CAPTCHA challenge on password page");
+    }
+
+    // ── Step 6: Parse password form ──────────────────────────────────────────
+    const passwordForm = parseFormFields(passwordHtml, passwordPageUrl);
+    if (!passwordForm.action || !passwordForm.csrf) {
+        throw new LoginFlowError(
+            "Password page: could not find form action or CSRF token — page structure changed",
+        );
+    }
+
+    // Extract returnPath for password page
+    const pwdReturnPathMatch = passwordHtml.match(/name="returnPath"[^>]+value="([^"]*)"/i);
+    const pwdReturnPath = pwdReturnPathMatch?.[1]?.replace(/&amp;/g, "&") ?? "";
+
+    // ── Step 7: POST password ────────────────────────────────────────────────
+    // Password field name: `Password.PasswordInput.StringValue`
+    // (matches SingleKey ID naming convention: UserIdentifierInput.EmailInput.StringValue)
+    const passwordBody = new URLSearchParams({
+        "Password.PasswordInput.StringValue": password,
+        "__RequestVerificationToken": passwordForm.csrf,
+        "credential": "",
+        "returnPath": pwdReturnPath,
+    });
+
+    let finalUrl: string;
+
+    try {
+        const submitResp = await jarClient.post<string>(
+            passwordForm.action,
+            passwordBody.toString(),
+            {
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+                responseType: "text",
+                // Follow redirects: Bosch OIDC callback chain after successful password
+                maxRedirects: 15,
+            },
+        );
+
+        finalUrl = (submitResp.request as { res?: { responseUrl?: string } })
+            ?.res?.responseUrl ?? passwordForm.action;
+
+        const submitHtml = (submitResp.data as string) ?? "";
+
+        // 200 with password form → wrong password
+        if (submitResp.status === 200 && submitHtml.includes("PasswordInput")) {
+            throw new InvalidCredentialsError("Password rejected by Bosch SingleKey ID");
+        }
+
+        if (submitResp.status >= 500) {
+            throw new LoginFlowError(`Password POST HTTP ${submitResp.status}`);
+        }
+    } catch (err: unknown) {
+        if (err instanceof InvalidCredentialsError || err instanceof LoginFlowError) throw err;
+        if (axios.isAxiosError(err)) {
+            const status = err.response?.status;
+            if (status !== undefined && status >= 500) {
+                throw new LoginFlowError(`Password POST HTTP ${status}`);
+            }
+            throw new LoginFlowError(`Network error during password POST: ${(err as Error).message}`);
+        }
+        throw new LoginFlowError(`Unexpected error during password POST: ${String(err)}`);
+    }
+
+    // ── Step 8: Extract OIDC code from final URL ─────────────────────────────
+    const code = extractCodeFromLocation(finalUrl);
+    if (!code) {
+        // Could be MFA redirect or other interactive step
+        if (/mfa|two-factor|2fa|otp/i.test(finalUrl)) {
+            throw new MfaRequiredError(`MFA redirect after password: ${finalUrl.substring(0, 120)}`);
+        }
+        throw new LoginFlowError(`No auth code in final URL: ${finalUrl.substring(0, 200)}`);
+    }
+
+    // ── Step 9: Exchange code for tokens ─────────────────────────────────────
+    const tokens = await exchangeCode(httpClient, code, verifier);
     if (!tokens) {
         throw new LoginFlowError("Token exchange returned null (transient network error)");
     }
-
     return tokens;
 }

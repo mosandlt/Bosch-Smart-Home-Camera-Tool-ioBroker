@@ -97,3 +97,15 @@ The script:
 
 - HA Integration: [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) (v12.0.1, Quality Scale Platinum)
 - Python CLI: [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) (v10.2.1)
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for the full release history.
+
+**Latest:** v0.1.0 — first functional release. Login + camera discovery + token auto-refresh loop. Library code for RCP+ switches and snapshot fetch shipped as preview (wired in v0.2.0).
+
+## License
+
+MIT License — see [LICENSE](./LICENSE).
+
+Copyright © 2026 mosandlt

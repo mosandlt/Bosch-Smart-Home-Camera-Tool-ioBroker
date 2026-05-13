@@ -1,23 +1,46 @@
 /**
- * Programmatic OAuth2 Login for Bosch SingleKey ID (Keycloak)
+ * @deprecated  Programmatic login is BLOCKED in production by hCaptcha on singlekey-id.com.
+ *              main.ts no longer calls loginWithCredentials().
+ *              This file is kept for tests / future captcha-solver paths only.
+ *              The active login path is: Browser PKCE + paste redirect URL (main.ts handleRedirectPaste).
  *
- * Implements the end-to-end username/password login flow without browser interaction.
+ * Programmatic OAuth2 Login for Bosch SingleKey ID
+ *
+ * Implements the end-to-end 2-step username/password login flow without
+ * browser interaction.
  *
  * Flow:
  *   1. generatePkcePair() + buildAuthUrl()
- *   2. GET auth URL → Keycloak returns HTML login form with action= URL
- *   3. Extract form action URL from HTML (regex match on <form ...action="...">)
- *   4. POST username + password to form action URL (with session cookie)
- *      - Keycloak 302 redirect to REDIRECT_URI?code=... → success
- *      - Keycloak 302 to MFA page (no code param) → MfaRequiredError
- *      - Keycloak 200 (HTML with error msg, no redirect) → InvalidCredentialsError
- *   5. Extract code from Location header
- *   6. exchangeCode() → TokenResult
+ *   2. GET auth URL → Bosch Keycloak → 303 broker/skid-p → 303 singlekey-id.com
+ *      → 302 chain → singlekey-id.com/en-gb/login?ReturnUrl=... (email page)
+ *      Cookie jar persists session cookies across all redirect hops.
+ *   3. Extract CSRF + returnPath from email page (form has NO action attr → post to page URL)
+ *   4. POST email to same URL → singlekey-id.com returns password page (200)
+ *      ⚠ hCaptcha guard: the "Continue" button is disabled by JS until captcha is solved.
+ *        Without a valid h-captcha-response the server returns the email page again.
+ *        Detected via: page title is still "Welcome" / no PasswordInput field found.
+ *   5. Extract password form action + new CSRF from password page
+ *   6. POST password → Bosch Keycloak callback → 302 to REDIRECT_URI?code=...
+ *   7. Extract code from final URL
+ *   8. exchangeCode() → TokenResult
+ *
+ * hCaptcha blocker (discovered 2026-05-13):
+ *   singlekey-id.com enforces hCaptcha (sitekey f8fe2d56-ad42-4f44-b9fe-5b30fcb0dd38)
+ *   on the email→password step. The submit button is disabled by default; JS enables it
+ *   only after the hCaptcha widget fires its callback. POSTing without a real
+ *   h-captcha-response token causes the server to silently return the same email page.
+ *   → MfaRequiredError is thrown until a captcha-solving path is added.
  *
  * Cookie handling:
- *   Keycloak sets a session cookie (KC_RESTART / AUTH_SESSION_ID) on the GET.
- *   This cookie must be sent back with the POST — otherwise Keycloak rejects the
- *   request. We extract Set-Cookie headers from the GET response and relay them.
+ *   singlekey-id.com sets .AspNetCore.Antiforgery.* + SKI_session cookies.
+ *   Without a persistent cookie jar all POSTs fail with CSRF validation errors (400).
+ *   We use tough-cookie + axios-cookiejar-support for automatic cross-redirect
+ *   cookie persistence.
+ *
+ * Password field name:
+ *   Traced as `Password.PasswordInput.StringValue` (consistent with the email field naming
+ *   convention `UserIdentifierInput.EmailInput.StringValue`). Could not be confirmed
+ *   server-side because hCaptcha prevents reaching the password page headlessly.
  *
  * References:
  *   Python CLI get_token.py: _pkce_pair, _build_auth_url, _exchange_code
@@ -25,11 +48,16 @@
  */
 import { type AxiosInstance } from "axios";
 import { type TokenResult } from "./auth";
-/** Thrown when Keycloak rejects username/password (200 response with error HTML, no redirect). */
+/** Thrown when SingleKey ID rejects username or password. */
 export declare class InvalidCredentialsError extends Error {
     constructor(message?: string);
 }
-/** Thrown when Keycloak demands an MFA / interactive step (302 to a page without a code). */
+/**
+ * Thrown when the login flow requires interactive verification:
+ * - hCaptcha on the email page (headless blocker as of 2026-05-13)
+ * - MFA / 2FA challenge
+ * - Additional account verification
+ */
 export declare class MfaRequiredError extends Error {
     constructor(message?: string);
 }
@@ -38,34 +66,55 @@ export declare class LoginFlowError extends Error {
     constructor(message: string);
 }
 /**
- * Extract the Keycloak login form action URL from the auth page HTML.
+ * Parse a form's POST target URL and its CSRF token.
  *
- * Keycloak renders a <form ... action="https://..."> on its login page.
- * The action URL is the direct POST endpoint for username/password.
+ * SingleKey ID uses ASP.NET Core Razor Pages:
+ * - The main email/password forms have NO action attribute → POST goes to same URL.
+ * - A language-switcher form at the bottom has action="/en-gb/language".
+ * - We want the first form without an action (or with a relative action that matches
+ *   the login path), NOT the language form.
  *
- * @param html  Raw HTML of the Keycloak login page
- * @returns The action URL, or null if not found
+ * @param html     Raw HTML of the page
+ * @param pageUrl  Current page URL (used when form has no action attribute)
+ * @returns Resolved action URL and CSRF token (or nulls if not found)
  */
-export declare function extractFormAction(html: string): string | null;
+export declare function parseFormFields(html: string, pageUrl: string): {
+    action: string | null;
+    csrf: string | null;
+};
 /**
- * Extract the authorization code from a redirect Location header.
+ * Extract the authorization code from a full redirect URL (query string).
  *
- * @param location  The Location header value from a 302 response
+ * @param location  Full URL (after following redirects to the OIDC callback)
  * @returns The code query parameter, or null if not present
  */
 export declare function extractCodeFromLocation(location: string): string | null;
 /**
- * End-to-end programmatic OAuth login for Bosch SingleKey ID (Keycloak).
+ * Detect hCaptcha / reCAPTCHA on a page.
+ * SingleKey ID uses hCaptcha (sitekey f8fe2d56-...) on the email submit button.
+ */
+export declare function detectCaptcha(html: string): boolean;
+/**
+ * Detect MFA / 2FA challenge page.
+ */
+export declare function detectMfa(html: string): boolean;
+export declare function extractFormAction(html: string): string | null;
+/**
+ * End-to-end programmatic OAuth2 login for Bosch SingleKey ID.
  *
- * Requires no browser. Submits username + password directly to the Keycloak
- * login form and captures the auth code from the redirect Location header.
+ * 2-step flow: POST email → POST password → capture OIDC code → exchange tokens.
  *
- * @param httpClient  Axios instance (injected for testability)
+ * ⚠ hCaptcha blocker: As of 2026-05-13, singlekey-id.com enforces hCaptcha on the
+ * email submission step. This function correctly detects the captcha and throws
+ * MfaRequiredError("hCaptcha required..."). No programmatic bypass is implemented.
+ * The ioBroker Admin UI should guide the user to authenticate via browser link.
+ *
+ * @param httpClient  Axios instance (timeout + TLS settings inherited)
  * @param username    Bosch SingleKey ID email address
  * @param password    Bosch SingleKey ID password
- * @returns TokenResult (access_token, refresh_token, ...) on success
- * @throws InvalidCredentialsError  — wrong username or password
- * @throws MfaRequiredError         — account requires MFA / additional verification
+ * @returns TokenResult on success
+ * @throws InvalidCredentialsError  — email or password rejected
+ * @throws MfaRequiredError         — hCaptcha / MFA / interactive step required
  * @throws LoginFlowError           — network errors, server errors, parsing failures
  */
 export declare function loginWithCredentials(httpClient: AxiosInstance, username: string, password: string): Promise<TokenResult>;
