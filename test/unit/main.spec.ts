@@ -12,11 +12,12 @@
  *   10. redirect_url paste but no stored PKCE verifier → error, no crash
  *   11. No tokens + no redirect_url but existing stored PKCE verifier → reuses verifier
  *
- *   v0.2.0 command handlers:
- *   6. handlePrivacyToggle → calls openLiveSession + sendRcpCommand with privacy-frame
+ *   v0.2.0 / v0.3.0 command handlers:
+ *   6. handlePrivacyToggle → Cloud-API PUT /v11/.../privacy, no RCP+ (gen2 returns 401)
  *   7. handleSnapshotTrigger → calls openLiveSession + fetchSnapshot + writeFileAsync + snapshot_path
- *   8. FCM start throws FcmNotImplementedError → info.fcm_active=stub, no crash
+ *   8. FCM start throws FcmCbsRegistrationError → info.fcm_active=error, no crash
  *   9. onUnload → stops TLS proxies + FCM listener + closes live sessions
+ *   12. handleImageRotationToggle → pure local flag (no Cloud API / no RCP+); state ack'd
  *
  * Strategy:
  *   - Inject @iobroker/adapter-core mock into require.cache before loading build/main.js
@@ -542,18 +543,18 @@ describe("main adapter — v0.2.0 command handlers", () => {
         // ── FCM stub class ─────────────────────────────────────────────────────
         const { EventEmitter } = require("events") as typeof import("events");
 
-        // FakeFcmNotImplementedError must be defined BEFORE FakeFcmListener so that
+        // FakeFcmCbsRegistrationError must be defined BEFORE FakeFcmListener so
         // the start() stub can throw an instanceof-compatible instance.
-        class FakeFcmNotImplementedError extends Error {
+        class FakeFcmCbsRegistrationError extends Error {
             constructor() {
-                super("FCM push receiver not implemented yet — pending evaluation of @aracna/fcm API against Bosch FCM config (project_id/app_id/api_key). Falling back to polling.");
-                this.name = "FcmNotImplementedError";
+                super("CBS registration rejected (fake test error)");
+                this.name = "FcmCbsRegistrationError";
             }
         }
 
         class FakeFcmListener extends EventEmitter {
-            // Default: throw FakeFcmNotImplementedError so main.js instanceof check passes
-            start = opts.fcmStart ?? sinon.stub().rejects(new FakeFcmNotImplementedError());
+            // Default: throw FakeFcmCbsRegistrationError to exercise error handling
+            start = opts.fcmStart ?? sinon.stub().rejects(new FakeFcmCbsRegistrationError());
             stop  = sinon.stub().resolves(undefined);
         }
 
@@ -588,8 +589,7 @@ describe("main adapter — v0.2.0 command handlers", () => {
 
         injectModule(FCM_PATH, {
             FcmListener:             FakeFcmListener,
-            FcmNotImplementedError:  FakeFcmNotImplementedError,
-            FcmCbsRegistrationError: class extends Error {},
+            FcmCbsRegistrationError: FakeFcmCbsRegistrationError,
             CLOUD_API:               "https://residential.cbs.boschsecurity.com",
             FCM_SENDER_ID:           "404630424405",
         });
@@ -676,9 +676,14 @@ describe("main adapter — v0.2.0 command handlers", () => {
         ).to.equal(true);
     });
 
-    // ── Test 8: FCM stub → info.fcm_active = "stub" ───────────────────────────
+    // ── Test 8: FCM start fails → info.fcm_active = "error", no crash ─────────
+    //
+    // FcmNotImplementedError was removed in v0.3.0 when the real @aracna/fcm
+    // implementation replaced the stub. This test now verifies that a
+    // FcmCbsRegistrationError (CBS auth rejection) is handled gracefully:
+    // adapter stays up with info.connection=true, fcm_active="error".
 
-    it("FCM start throws FcmNotImplementedError → info.fcm_active=stub, no crash", async () => {
+    it("FCM start throws FcmCbsRegistrationError → info.fcm_active=error, no crash", async () => {
         const { db, adapter } = createAdapterWithMocks();
 
         let threw = false;
@@ -688,15 +693,15 @@ describe("main adapter — v0.2.0 command handlers", () => {
             threw = true;
         }
 
-        expect(threw, "onReady must not crash on FcmNotImplementedError").to.equal(false);
+        expect(threw, "onReady must not crash on FcmCbsRegistrationError").to.equal(false);
         expect(
             getStateVal(db, adapter, "info.connection"),
             "info.connection should be true",
         ).to.equal(true);
         expect(
             getStateVal(db, adapter, "info.fcm_active"),
-            "info.fcm_active should be 'stub'",
-        ).to.equal("stub");
+            "info.fcm_active should be 'error' when CBS registration fails",
+        ).to.equal("error");
     });
 
     // ── Test 9: onUnload cleanup ──────────────────────────────────────────────
@@ -749,5 +754,54 @@ describe("main adapter — v0.2.0 command handlers", () => {
             getStateVal(db, adapter, "info.connection"),
             "info.connection false after unload",
         ).to.equal(false);
+    });
+
+    // ── Test 12: handleImageRotationToggle — pure local flag, no RCP+ / Cloud API ──
+    //
+    // Regression test for: RCP+ 0x0810 returned HTTP 401 on Gen2 FW 9.40.25.
+    // Fix: rotation is a client-side display flag only — Bosch Cloud API exposes
+    // no image-rotation endpoint (confirmed in HA integration switch.py).
+    // Handler must NOT call sendRcpCommand, NOT open a live session, NOT issue
+    // any HTTP PUT — it just stores the flag and acknowledges the ioBroker state.
+
+    it("handleImageRotationToggle: pure local flag — no RCP+, no Cloud PUT, state ack'd", async () => {
+        // No extra axios responses needed — handler must NOT issue any HTTP call.
+        // If it tries to call sendRcpCommand the stub will be checked below (callCount=0).
+        const sendRcpCommandSpy = sinon.stub().resolves({ payload: Buffer.alloc(0) });
+
+        const { db, adapter } = createAdapterWithMocks({
+            sendRcpCommand: sendRcpCommandSpy,
+            // No extraAxiosResponses — zero additional HTTP calls expected
+        });
+
+        await adapter.readyHandler!();
+
+        const camId  = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.image_rotation_180`;
+
+        // Trigger: user sets image_rotation_180 = true
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+
+        // State must be ack'd with the requested value
+        const state = db.getState(stateId) as ioBroker.State | undefined;
+        expect(state?.ack,  "image_rotation_180 state must be ack'd").to.equal(true);
+        expect(state?.val,  "image_rotation_180 state value must be true").to.equal(true);
+
+        // sendRcpCommand must NEVER have been called (no RCP+ for rotation)
+        expect(
+            sendRcpCommandSpy.callCount,
+            "sendRcpCommand must NOT be called for image_rotation_180 (pure local flag)",
+        ).to.equal(0);
+
+        // Toggle off
+        await adapter.stateChangeHandler!(stateId, { val: false, ack: false, ts: 0, lc: 0, from: "" });
+
+        const stateOff = db.getState(stateId) as ioBroker.State | undefined;
+        expect(stateOff?.ack, "image_rotation_180 OFF state must be ack'd").to.equal(true);
+        expect(stateOff?.val, "image_rotation_180 OFF state value must be false").to.equal(false);
+        expect(
+            sendRcpCommandSpy.callCount,
+            "sendRcpCommand must still be 0 after rotation-off toggle",
+        ).to.equal(0);
     });
 });

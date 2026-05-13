@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "news": {
+      "0.3.0": {
+        "en": "FCM push events live: motion/audio/person events via @aracna/fcm MTalk/MCS (replaces v0.2.0 stub). Image rotation fixed: pure client-side flag, no RCP+ needed.",
+        "de": "FCM-Push-Ereignisse live: Bewegungs-/Audio-/Personen-Events via @aracna/fcm MTalk/MCS (ersetzt v0.2.0-Stub). Bildrotation korrigiert: reines Client-Flag, kein RCP+ erforderlich.",
+        "ru": "FCM push-события работают: движение/аудио/персона через @aracna/fcm MTalk/MCS (заменяет заглушку v0.2.0). Поворот изображения исправлен: чистый клиентский флаг, RCP+ не нужен.",
+        "pt": "Eventos FCM push funcionando: eventos de movimento/áudio/pessoa via @aracna/fcm MTalk/MCS (substitui stub v0.2.0). Rotação de imagem corrigida: flag puramente do lado do cliente, sem necessidade de RCP+.",
+        "nl": "FCM push-events live: beweging/audio/persoon events via @aracna/fcm MTalk/MCS (vervangt v0.2.0 stub). Beeldrotatie gecorrigeerd: pure client-side vlag, geen RCP+ nodig.",
+        "fr": "Événements FCM push actifs : événements de mouvement/audio/personne via @aracna/fcm MTalk/MCS (remplace le stub v0.2.0). Rotation d'image corrigée : indicateur côté client pur, pas besoin de RCP+.",
+        "it": "Eventi FCM push attivi: eventi di movimento/audio/persona via @aracna/fcm MTalk/MCS (sostituisce lo stub v0.2.0). Rotazione immagine corretta: flag puramente lato client, nessun RCP+ necessario.",
+        "es": "Eventos FCM push en vivo: eventos de movimiento/audio/persona via @aracna/fcm MTalk/MCS (reemplaza el stub v0.2.0). Rotación de imagen corregida: flag puramente del lado del cliente, sin necesidad de RCP+.",
+        "pl": "Zdarzenia push FCM działają: zdarzenia ruchu/audio/osoby przez @aracna/fcm MTalk/MCS (zastępuje stub v0.2.0). Rotacja obrazu naprawiona: czysty znacznik po stronie klienta, bez potrzeby RCP+.",
+        "uk": "FCM push-події працюють: рух/аудіо/особа через @aracna/fcm MTalk/MCS (замінює заглушку v0.2.0). Поворот зображення виправлено: чистий прапорець на стороні клієнта, RCP+ не потрібен.",
+        "zh-cn": "FCM推送事件上线：通过@aracna/fcm MTalk/MCS实现运动/音频/人员事件（取代v0.2.0存根）。图像旋转已修复：纯客户端标志，无需RCP+。"
+      },
       "0.2.0": {
         "en": "Snapshot, switches and stream URL wired: privacy/light/rotation RCP+ commands work, snapshot trigger fetches JPEG into adapter file-store, per-camera RTSP stream URL via local TLS proxy, FCM stub sets info.fcm_active=stub (real push in v0.3.0).",
         "de": "Snapshot, Schalter und Stream-URL verdrahtet: Datenschutz-/Licht-/Rotations-RCP+-Befehle funktionieren, Snapshot-Trigger lädt JPEG in den Adapter-Datenspeicher, RTSP-Stream-URL pro Kamera via lokalem TLS-Proxy, FCM-Stub setzt info.fcm_active=stub (echter Push in v0.3.0).",

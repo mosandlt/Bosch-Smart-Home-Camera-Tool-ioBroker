@@ -12,7 +12,7 @@
  *   4. [live_session.ts] Open proxy session per camera (v0.2.0)
  *   5. [tls_proxy.ts]    Register RTSPS sources as local RTSP via TLS proxy (v0.2.0)
  *   6. [fcm.ts]          FCM push registration → motion/audio/person events (stub → v0.3.0)
- *   7. [rcp.ts]          RCP+ commands: privacy, light, image rotation (v0.2.0)
+ *   7. [rcp.ts]          RCP+ protocol helpers (unused since v0.3.0 — all commands use Cloud API)
  *   8. [snapshot.ts]     Snapshot fetch + write to adapter file-store (v0.2.0)
  */
 import * as utils from "@iobroker/adapter-core";
@@ -35,6 +35,18 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     private _cameras;
     /** FCM push listener (null until onReady wires it up). */
     private _fcmListener;
+    /**
+     * Client-side image rotation flag per camera ID.
+     * Bosch Cloud API has no rotation endpoint — flag is stored here so
+     * downstream callers (snapshot post-processing, UI) can apply 180° transforms.
+     */
+    private _imageRotation;
+    /**
+     * ISO timestamp of the latest processed event per camera.
+     * Used by fetchAndProcessEvents() to skip events we've already seen.
+     * Keyed by camera ID. float('-inf') equivalent → empty string means "not seen".
+     */
+    private _lastSeenEventId;
     constructor(options?: Partial<utils.AdapterOptions>);
     /**
      * Write a state only if the value changed (iobroker.ring upsertState pattern).
@@ -75,13 +87,6 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private ensureLiveSession;
     /**
-     * Derive the rcp.xml base URL from a live session.
-     *
-     * LOCAL:  "https://192.168.x.x:443/rcp.xml"
-     * REMOTE: "https://proxy-NN:42090/{hash}/rcp.xml"
-     */
-    private getRcpUrl;
-    /**
      * Generate (or reuse) a PKCE pair, build the Bosch auth URL, and log it.
      *
      * The verifier is stored in info.pkce_verifier so it survives restarts —
@@ -110,7 +115,7 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * 4. Create per-camera state tree
      * 5. Set info.connection = true
      * 6. Arm token refresh loop
-     * 7. Start FCM listener (stub → sets info.fcm_active = "stub")
+     * 7. Start FCM listener (real push via @aracna/fcm, sets info.fcm_active = "healthy")
      */
     private onReady;
     /**
@@ -125,11 +130,19 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private onFcmEvent;
     /**
-     * Derive Digest credentials from a live session for LOCAL RCP+ calls.
-     * Cloud proxy URLs are pre-authenticated via the URL hash — return undefined
-     * so the REMOTE codepath is taken in sendRcpCommand().
+     * Fetch fresh events for all known cameras from the Bosch Cloud API.
+     *
+     * Called on every FCM "push" (silent wake-up — Bosch sends no event payload
+     * in the push itself). Mirrors Python async_handle_fcm_push() in fcm.py.
+     *
+     * Endpoint: GET /v11/events?videoInputId={camId}&limit=5
+     * Returns: array of event objects (newest first) or empty array.
+     *
+     * Event object fields (confirmed via HA integration):
+     *   { id, eventType, eventTags, timestamp/createdAt, videoInputId }
+     * Gen2: eventType=MOVEMENT + eventTags=["PERSON"] → normalise to "person"
      */
-    private getRcpAuth;
+    private fetchAndProcessEvents;
     /**
      * Privacy mode: PUT /v11/video_inputs/{camId}/privacy with
      * { privacyMode: "ON" | "OFF", durationInSeconds: null }.
@@ -152,7 +165,16 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private handleLightToggle;
     /**
-     * Image rotation: RCP+ command 0x0810 WRITE (Digest for LOCAL, hash for REMOTE).
+     * Image rotation: pure client-side flag — no Bosch Cloud API endpoint exists.
+     *
+     * Bosch's Cloud API has no image-rotation field (confirmed in the HA integration:
+     * "Cloud API does not expose any image-rotation field; this switch is a pure
+     * client-side display flag"). RCP+ 0x0810 returned HTTP 401 on Gen2 FW 9.40.25
+     * with valid Digest auth — and even if it worked, it would only affect the
+     * camera's own RTSP stream orientation, not how ioBroker consumers display it.
+     *
+     * The flag is stored in-memory (_imageRotation) so downstream callers (snapshot
+     * post-processing, UI consumers reading the state) can apply 180° transforms.
      */
     private handleImageRotationToggle;
     /**

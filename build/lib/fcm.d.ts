@@ -1,44 +1,48 @@
 /**
  * FCM (Firebase Cloud Messaging) push receiver for Bosch Smart Home Camera.
  *
- * Port of the Python fcm.py → TypeScript EventEmitter pattern.
+ * Port of the Python fcm.py → TypeScript EventEmitter pattern using @aracna/fcm.
  *
- * ## Library research (2026-05-13)
+ * ## Library: @aracna/fcm v1.0.32
  *
- * The Python HA integration uses `firebase-messaging` (sdb9696) which speaks the
- * MTalk/MCS protocol to `mtalk.google.com:5228`. It registers with:
- *   - project_id  (Firebase project, e.g. "bosch-smart-cameras")
- *   - app_id      (Firebase app ID, e.g. "1:404630424405:android:…")
- *   - api_key     (Firebase restricted browser key)
- *   - messaging_sender_id  ("404630424405")
+ * Speaks MTalk/MCS protocol to mtalk.google.com:5228, same as the Python
+ * firebase-messaging (sdb9696). Registration flow:
+ *   1. createFcmECDH() + generateFcmAuthSecret() → ECDH key pair + auth secret
+ *   2. registerToFCM({ appID, ece, firebase }) → { acg: { id, securityToken }, token }
+ *   3. FcmClient({ acg, ece }).connect() → persistent TLS socket, emits "message-data"
  *
- * Node.js options evaluated:
- *   A) push-receiver@2.1.1 — uses only `senderId` (no project_id/app_id/api_key).
- *      Internally calls the old `fcm.googleapis.com/fcm/connect/subscribe` v1 API
- *      via `request-promise` (deprecated). Credential model is incompatible with
- *      the Bosch FCM config structure. Last published 2022-06-25.
- *   B) @aracna/fcm@1.0.32 — described as "more recent/robust version of push-receiver";
- *      last published 2026-03-07. GitHub README and official docs site returned 404/403
- *      for all fetch attempts. API cannot be verified without installing the package.
- *   C) Manual MTalk — too complex, skip.
+ * FCM push from Bosch is a silent wake-up ("data-only" message) — no notification
+ * payload. The adapter fetches fresh events from /v11/events on each push.
  *
- * Decision: **STUB implementation** — exports the full FcmListener API, but
- * `start()` throws `FcmNotImplementedError` so the coordinator can wire it up now
- * and the adapter compiles cleanly. Real FCM receive will be added once @aracna/fcm
- * is confirmed API-compatible with Bosch's project_id/app_id/api_key config.
+ * ## Push mode
+ * - "ios":     register as iOS app (FCM_IOS_APP_ID) — matches Python HA integration default
+ * - "android": register as Android app
+ * - "auto":    try iOS first, fall back to Android (same as Python fcm.py)
  *
- * Blocked by: evaluating @aracna/fcm API surface against Bosch FCM config.
- * Track: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/issues
+ * ## Credential persistence
+ * ACG ID / ACG security token / ECDH keys must be persisted across restarts to avoid
+ * re-registration on every adapter start. Pass `savedCredentials.raw` (FcmCredentials.raw)
+ * back in on the next start — same pattern as Python `saved_fcm_creds`.
+ *
+ * ## Reconnect
+ * The FcmClient does NOT auto-reconnect on socket close. The caller is responsible for
+ * re-calling start() after a "disconnect" event (with exponential back-off). The
+ * coordinator's watchdog timer handles this.
  *
  * Constants mirrored from Python fcm.py:
  *   FCM_SENDER_ID = "404630424405"
  *   FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
+ *
+ * Firebase config (Android, "bosch-smart-cameras" project) — public app identifiers
+ * embedded in every Bosch Smart Camera APK, confirmed by Bosch (Sebastian Raff, 2026-04-20).
  */
 import { EventEmitter } from "events";
 import type { AxiosInstance } from "axios";
+import { FcmClient, createFcmECDH, generateFcmAuthSecret, registerToFCM } from "@aracna/fcm";
 export declare const CLOUD_API = "https://residential.cbs.boschsecurity.com";
 export declare const FCM_SENDER_ID = "404630424405";
 export declare const FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc";
+export declare const FCM_ANDROID_APP_ID = "1:404630424405:android:9e5b6b58e4c70075";
 /**
  * Payload emitted on every motion / audio-alarm / person event.
  * Mirrors the event_payload dict in Python fcm.py _on_fcm_push().
@@ -58,16 +62,34 @@ export interface FcmEventPayload {
     eventId?: string;
 }
 /**
+ * Persisted FCM credential blob — must be stored by the caller and passed back
+ * in on the next adapter start via `savedCredentials.raw` to avoid re-registration.
+ * Mirrors `saved_fcm_creds` pattern in Python HA integration.
+ */
+export interface FcmRawCredentials {
+    /** ACG ID as a decimal string (bigint can't be JSON-serialised natively) */
+    acgId: string;
+    /** ACG security token as a decimal string */
+    acgSecurityToken: string;
+    /** ECE auth secret (Uint8Array serialised as number array for JSON) */
+    authSecret: number[];
+    /** ECDH private key (Uint8Array serialised as number array for JSON) */
+    ecdhPrivateKey: number[];
+    /** ECDH public key (Uint8Array serialised as number array for JSON) */
+    ecdhPublicKey: number[];
+    /** Push mode used for this registration */
+    mode: "ios" | "android";
+}
+/**
  * FCM credentials returned after successful registration.
- * Intended to be persisted by the caller across restarts (same pattern as
- * `saved_fcm_creds` in Python HA integration).
+ * Intended to be persisted by the caller across restarts.
  */
 export interface FcmCredentials {
     fcmToken: string;
     /** Push mode actually used ("ios" | "android") */
     mode: "ios" | "android";
-    /** Raw credential blob from the underlying FCM library (opaque) */
-    raw?: unknown;
+    /** Raw credential blob for persistence across restarts (pass as savedCredentials.raw) */
+    raw: FcmRawCredentials;
 }
 /**
  * Options for FcmListener construction.
@@ -87,19 +109,18 @@ export interface FcmListenerOptions {
     savedCredentials?: FcmCredentials;
 }
 /**
- * Thrown by start() when the FCM push receiver is not yet implemented.
- * The adapter compiles and runs; only real-time push is unavailable.
- * The coordinator should fall back to polling when it catches this error.
- */
-export declare class FcmNotImplementedError extends Error {
-    constructor();
-}
-/**
  * Thrown when CBS device registration fails with a non-retryable HTTP error.
  */
 export declare class FcmCbsRegistrationError extends Error {
     readonly httpStatus: number;
     constructor(httpStatus: number, message: string);
+}
+/**
+ * Thrown when FCM registration fails (network error or Google API rejection).
+ */
+export declare class FcmRegistrationError extends Error {
+    readonly cause?: unknown | undefined;
+    constructor(message: string, cause?: unknown | undefined);
 }
 /**
  * FCM push-notification listener for Bosch Smart Home Camera events.
@@ -108,6 +129,7 @@ export declare class FcmCbsRegistrationError extends Error {
  *   "motion"      → FcmEventPayload
  *   "audio_alarm" → FcmEventPayload
  *   "person"      → FcmEventPayload
+ *   "push"        → FcmClientMessageData (raw push, for coordinator to fetch events)
  *   "registered"  → FcmCredentials
  *   "error"       → Error
  *   "disconnect"  → void
@@ -115,51 +137,75 @@ export declare class FcmCbsRegistrationError extends Error {
  * Usage:
  * ```typescript
  * const fcm = new FcmListener(httpClient, bearerToken);
- * fcm.on("motion", (payload) => { ... });
- * fcm.on("person", (payload) => { ... });
- * try {
- *   await fcm.start();
- * } catch (err) {
- *   if (err instanceof FcmNotImplementedError) {
- *     // FCM not available — fall back to polling
- *   }
- * }
+ * fcm.on("push", () => { coordinator.fetchEvents(); });
+ * fcm.on("registered", (creds) => { saveCredentials(creds); });
+ * await fcm.start();
+ * // ...
+ * await fcm.stop();
  * ```
+ *
+ * Note: Bosch pushes are silent wake-up signals with no event payload. The
+ * coordinator should listen to "push" and immediately call the Bosch /v11/events
+ * API — same as Python async_handle_fcm_push().
+ * The "motion", "audio_alarm", "person" events are emitted only when the raw
+ * push message contains explicit event-type data in its data dict.
  */
+/**
+ * Injectable FCM dependencies — allows tests to override the @aracna/fcm
+ * functions without sinon module-property stubbing (which fails on ES module
+ * non-configurable exports).
+ *
+ * Production code uses the real @aracna/fcm functions (default).
+ * Tests pass a `deps` object with sinon stubs.
+ */
+export interface FcmDeps {
+    registerToFCM: typeof registerToFCM;
+    createFcmECDH: typeof createFcmECDH;
+    generateFcmAuthSecret: typeof generateFcmAuthSecret;
+    FcmClient: typeof FcmClient;
+}
 export declare class FcmListener extends EventEmitter {
     private readonly _httpClient;
     private readonly _bearerToken;
     private readonly _options;
+    /** Injectable deps — overridable in tests. */
+    readonly _deps: FcmDeps;
     private _fcmToken;
     private _running;
-    /** Internal handle returned by the underlying FCM library (opaque) */
     private _clientHandle;
-    constructor(httpClient: AxiosInstance, bearerToken: string, options?: FcmListenerOptions);
+    constructor(httpClient: AxiosInstance, bearerToken: string, options?: FcmListenerOptions, deps?: Partial<FcmDeps>);
     /**
      * Register with FCM and start listening for push notifications.
      *
-     * Step 1: Register this adapter instance with Google FCM → get device token.
-     * Step 2: Register the token with Bosch CBS (`POST /v11/devices`).
-     * Step 3: Start the long-lived FCM connection and emit events.
+     * Step 1: Generate or restore ECDH key pair + auth secret.
+     * Step 2: Register with Google FCM (registerToFCM) → get ACG tokens + FCM token.
+     * Step 3: Register the FCM token with Bosch CBS (POST /v11/devices).
+     * Step 4: Start FcmClient TLS socket → emit "push" on every incoming message.
      *
-     * @throws FcmNotImplementedError  Always — stub pending real FCM library.
-     * @throws FcmCbsRegistrationError If Bosch CBS rejects the token (HTTP 4xx).
+     * @emits "registered" with FcmCredentials once FCM + CBS registration complete.
+     * @throws FcmRegistrationError   if Google FCM registration fails.
+     * @throws FcmCbsRegistrationError if Bosch CBS rejects the token (HTTP 4xx).
      */
     start(): Promise<void>;
     /**
-     * Stop the listener cleanly. Closes the MTalk connection and sets state to
+     * Stop the listener cleanly. Closes the MTalk TLS socket and sets state to
      * stopped. Safe to call multiple times (idempotent).
+     * @emits "disconnect"
      */
     stop(): Promise<void>;
     /**
      * Returns the current FCM device token, or null if not yet registered.
-     * Can be used for status display in the adapter UI.
      */
     getFcmToken(): string | null;
     /**
-     * Returns true when the FCM connection is active and receiving pushes.
+     * Returns true when the FCM TLS socket is active and receiving pushes.
      */
     isHealthy(): boolean;
+    /**
+     * Attempt FCM registration + CBS registration + client start for a single mode.
+     * Returns true on success, false on any error (caller logs and falls back).
+     */
+    private _tryStart;
     /**
      * Register the FCM device token with Bosch CBS.
      *
@@ -170,6 +216,16 @@ export declare class FcmListener extends EventEmitter {
      * @throws FcmCbsRegistrationError on non-retryable HTTP 4xx.
      */
     _registerWithCbs(token: string, mode: "ios" | "android"): Promise<void>;
+    /**
+     * Handle an incoming FCM push message from Bosch.
+     *
+     * Bosch pushes are typically silent wake-ups (no event-type data in payload).
+     * Always emits "push" so the coordinator can fetch /v11/events immediately.
+     * If the data dict contains event type info, also parses and emits the typed event.
+     *
+     * Mirrors Python _on_fcm_push() + async_handle_fcm_push() flow.
+     */
+    private _onPush;
     /**
      * Parse a raw FCM notification payload into a typed FcmEventPayload.
      * Mirrors the event-type normalisation in Python _on_fcm_push() +
