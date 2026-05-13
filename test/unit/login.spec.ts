@@ -42,11 +42,7 @@ import {
 import * as authModule from "../../src/lib/auth";
 import { RefreshTokenInvalidError } from "../../src/lib/auth";
 
-import {
-    stubAxiosSequence,
-    stubAxiosError,
-    restoreAxios,
-} from "./helpers/axios-mock";
+import { stubAxiosSequence, stubAxiosError, restoreAxios } from "./helpers/axios-mock";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -57,8 +53,10 @@ const FAKE_PKCE = {
 const FAKE_AUTH_URL =
     "https://smarthome.authz.bosch.com/auth/realms/home_auth_provider/protocol/openid-connect/auth" +
     "?client_id=oss_residential_app&state=test-state";
-const FAKE_EMAIL_PAGE_URL = "https://singlekey-id.com/en-gb/login?ReturnUrl=%2Fauth%2Fconnect%2Fauthorize%2Fcallback";
-const FAKE_PASSWORD_PAGE_URL = "https://singlekey-id.com/en-gb/login?Current=%5B%5D&returnUrl=%2Fauth%2Fconnect";
+const FAKE_EMAIL_PAGE_URL =
+    "https://singlekey-id.com/en-gb/login?ReturnUrl=%2Fauth%2Fconnect%2Fauthorize%2Fcallback";
+const FAKE_PASSWORD_PAGE_URL =
+    "https://singlekey-id.com/en-gb/login?Current=%5B%5D&returnUrl=%2Fauth%2Fconnect";
 const FAKE_CALLBACK_URL = "https://www.bosch.com/boschcam?code=AUTH_CODE_XYZ&state=test-state";
 const FAKE_MFA_LOCATION = "https://singlekey-id.com/en-gb/mfa?returnUrl=%2Fauth%2Fconnect";
 
@@ -103,15 +101,15 @@ const PASSWORD_PAGE_HTML = `<!DOCTYPE html>
 </body></html>`;
 
 // Password page returned when password is wrong — same form, possibly with error text
-const WRONG_PASSWORD_HTML = PASSWORD_PAGE_HTML;  // server returns same password page
+const WRONG_PASSWORD_HTML = PASSWORD_PAGE_HTML; // server returns same password page
 
 const TOKEN_BODY = {
-    access_token:       "acc.jwt.here",
-    refresh_token:      "ref.jwt.here",
-    expires_in:         300,
+    access_token: "acc.jwt.here",
+    refresh_token: "ref.jwt.here",
+    expires_in: 300,
     refresh_expires_in: 86400,
-    token_type:         "Bearer",
-    scope:              "email offline_access profile openid",
+    token_type: "Bearer",
+    scope: "email offline_access profile openid",
 };
 
 // ── parseFormFields() ─────────────────────────────────────────────────────────
@@ -190,7 +188,8 @@ describe("extractCodeFromLocation()", () => {
     });
 
     it("returns null when URL contains error param", () => {
-        expect(extractCodeFromLocation("https://www.bosch.com/boschcam?error=access_denied")).to.be.null;
+        expect(extractCodeFromLocation("https://www.bosch.com/boschcam?error=access_denied")).to.be
+            .null;
     });
 
     it("returns null when no code param in URL", () => {
@@ -242,7 +241,11 @@ describe("detectMfa()", () => {
     });
 
     it("returns false for normal login pages", () => {
-        expect(detectMfa("<form><input type='password' name='Password.PasswordInput.StringValue'></form>")).to.be.false;
+        expect(
+            detectMfa(
+                "<form><input type='password' name='Password.PasswordInput.StringValue'></form>",
+            ),
+        ).to.be.false;
     });
 });
 
@@ -254,7 +257,7 @@ describe("loginWithCredentials()", () => {
     let exchangeSub: sinon.SinonStub;
 
     beforeEach(() => {
-        pkceSub    = sinon.stub(authModule, "generatePkcePair").returns(FAKE_PKCE);
+        pkceSub = sinon.stub(authModule, "generatePkcePair").returns(FAKE_PKCE);
         authUrlSub = sinon.stub(authModule, "buildAuthUrl").returns(FAKE_AUTH_URL);
         exchangeSub = sinon.stub(authModule, "exchangeCode");
     });
@@ -309,14 +312,19 @@ describe("loginWithCredentials()", () => {
             },
         ]);
 
-        const result = await loginWithCredentials(axios.create(), "user@example.com", "correct-password");
+        const result = await loginWithCredentials(
+            axios.create(),
+            "user@example.com",
+            "correct-password",
+        );
 
         expect(result.access_token).to.equal(TOKEN_BODY.access_token);
         expect(result.refresh_token).to.equal(TOKEN_BODY.refresh_token);
         expect(result.expires_in).to.equal(TOKEN_BODY.expires_in);
         expect(pkceSub.calledOnce).to.be.true;
         expect(authUrlSub.calledOnce).to.be.true;
-        expect(exchangeSub.calledOnceWith(sinon.match.any, "AUTH_CODE_XYZ", FAKE_PKCE.verifier)).to.be.true;
+        expect(exchangeSub.calledOnceWith(sinon.match.any, "AUTH_CODE_XYZ", FAKE_PKCE.verifier)).to
+            .be.true;
     });
 
     // ── Test 2: hCaptcha blocks email → MfaRequiredError ─────────────────────
@@ -352,7 +360,7 @@ describe("loginWithCredentials()", () => {
 
     it("throws InvalidCredentialsError when email is not registered (email not pre-filled in response)", async () => {
         // Server returns email page but email field value is still empty (email not accepted)
-        const notRegisteredHtml = EMAIL_PAGE_HTML;  // email value="" — not pre-filled
+        const notRegisteredHtml = EMAIL_PAGE_HTML; // email value="" — not pre-filled
 
         stubAxiosSequence([
             {
@@ -402,7 +410,7 @@ describe("loginWithCredentials()", () => {
             // POST password → same password page returned (wrong password)
             {
                 status: 200,
-                data: WRONG_PASSWORD_HTML,  // still contains PasswordInput
+                data: WRONG_PASSWORD_HTML, // still contains PasswordInput
                 headers: {},
                 request: { res: { responseUrl: FAKE_PASSWORD_PAGE_URL } },
             },

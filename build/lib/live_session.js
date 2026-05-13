@@ -1,19 +1,19 @@
 "use strict";
 /**
- * Bosch Cloud Live-Session opener.
+ * Bosch Cloud Live-Session opener — LOCAL only.
  *
  * Opens a per-camera proxy session via:
  *   PUT https://residential.cbs.boschsecurity.com/v11/video_inputs/{id}/connection
  *
- * Response shapes (from HA __init__.py _try_live_connection_inner):
+ * Response shape (LOCAL, 200/201):
+ *   { "user": "cbs-XXXXXX", "password": "...", "urls": ["192.168.x.x:443"],
+ *     "imageUrlScheme": "https://{url}/snap.jpg", "bufferingTime": 500,
+ *     "maxSessionDuration": 3600, ... }
  *
- *   LOCAL (200/201):
- *     { "user": "cbs-XXXXXX", "password": "...", "urls": ["192.168.x.x:443"],
- *       "imageUrlScheme": "https://{url}/snap.jpg", "bufferingTime": 500, ... }
- *
- *   REMOTE (200/201):
- *     { "urls": ["proxy-NN:42090/{hash}"], "bufferingTime": 1000, ... }
- *     — or legacy shape: { "hash": "...", "proxyHost": "...", "proxyPort": 42090, ... }
+ * DESIGN CONSTRAINT (v0.4.0): This adapter NEVER uses Bosch's cloud media relay
+ * (proxy-NN.live.cbs.boschsecurity.com:42090). Cloud REST calls for login /
+ * discovery / control are fine — only media paths must go LOCAL.
+ * If Bosch returns a non-LOCAL session, an error is thrown.
  *
  * Error codes:
  *   401 → token expired (caller must refresh and retry)
@@ -69,64 +69,56 @@ class SessionLimitError extends Error {
 }
 exports.SessionLimitError = SessionLimitError;
 // ── Internal helpers ───────────────────────────────────────────────────────────
-const SNAP_SUFFIX = "/snap.jpg?JpegSize=1206";
 /**
  * Build the snap.jpg proxy URL from a raw Bosch "urls" entry and the
- * imageUrlScheme (LOCAL) or fixed HTTPS format (REMOTE).
+ * imageUrlScheme (LOCAL).
  *
  * LOCAL:  imageUrlScheme = "https://{url}/snap.jpg"; substitute {url} = "192.168.x.x:443"
- * REMOTE: urls[0] = "proxy-NN:42090/{hash}" → prepend "https://"
  *
- * @param connectionType
- * @param urlEntry
- * @param imageUrlScheme
+ * @param urlEntry        LAN address string e.g. "192.168.x.x:443"
+ * @param imageUrlScheme  Optional URL template from Bosch response
  */
-function buildProxyUrl(connectionType, urlEntry, imageUrlScheme) {
-    if (connectionType === "LOCAL") {
-        // Replace {url} placeholder in imageUrlScheme if available, else default
-        const scheme = imageUrlScheme ?? "https://{url}/snap.jpg";
-        let url = scheme.replace("{url}", urlEntry);
-        // Ensure JpegSize is set
-        if (!url.includes("JpegSize=")) {
-            url += `${url.includes("?") ? "&" : "?"}JpegSize=1206`;
-        }
-        return url;
+function buildProxyUrl(urlEntry, imageUrlScheme) {
+    // Replace {url} placeholder in imageUrlScheme if available, else default
+    const scheme = imageUrlScheme ?? "https://{url}/snap.jpg";
+    let url = scheme.replace("{url}", urlEntry);
+    // Ensure JpegSize is set
+    if (!url.includes("JpegSize=")) {
+        url += `${url.includes("?") ? "&" : "?"}JpegSize=1206`;
     }
-    // REMOTE: urlEntry is "proxy-NN:42090/{hash}"
-    return `https://${urlEntry}${SNAP_SUFFIX}`;
+    return url;
 }
 // ── openLiveSession ────────────────────────────────────────────────────────────
 /**
- * Open a live proxy session for a camera.
+ * Open a LOCAL live proxy session for a camera.
  *
  * Calls PUT /v11/video_inputs/{cameraId}/connection with body:
- *   { "type": <mode>, "highQualityVideo": true }
+ *   { "type": "LOCAL", "highQualityVideo": true }
  *
- * Returns a LiveSession containing the proxyUrl (for snap.jpg / RCP+)
- * and Digest credentials (LOCAL only).
+ * Returns a LiveSession containing the LOCAL proxyUrl (for snap.jpg / RCP+)
+ * and Digest credentials.
+ *
+ * IMPORTANT: This adapter is LOCAL-only by design. If Bosch returns a
+ * non-LOCAL session (e.g. because the camera is unreachable on the LAN),
+ * a LiveSessionError is thrown. The cloud relay at
+ * proxy-NN.live.cbs.boschsecurity.com:42090 is NEVER used for media.
  *
  * @param httpClient  Axios instance (caller controls SSL/timeout options)
  * @param token       Bearer access token
  * @param cameraId    Camera UUID
- * @param mode        Preferred connection type (default "AUTO")
- * @returns LiveSession on success
+ * @returns LiveSession on success (always LOCAL)
  * @throws CameraOfflineError  when camera is offline / privacy mode on (503, 443-privacy)
  * @throws SessionLimitError   when Bosch quota hit (444)
- * @throws LiveSessionError    on 401, 404, 5xx, network, or malformed response
+ * @throws LiveSessionError    on 401, 404, 5xx, network, non-LOCAL response, or malformed response
  */
-async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
-    // Map adapter mode to Bosch API type string
-    // AUTO → try LOCAL first (mirrors HA AUTO behaviour on LAN); we pass "LOCAL"
-    // and let callers fall back to REMOTE_ONLY on failure if needed.
-    // For simplicity in the ioBroker adapter, mode collapses to a single PUT.
-    const typeVal = mode === "LOCAL_ONLY" ? "LOCAL" : mode === "REMOTE_ONLY" ? "REMOTE" : /* AUTO */ "LOCAL";
+async function openLiveSession(httpClient, token, cameraId) {
     const url = `${auth_1.CLOUD_API}/v11/video_inputs/${cameraId}/connection`;
     const headers = {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: "application/json",
     };
-    const body = { type: typeVal, highQualityVideo: true };
+    const body = { type: "LOCAL", highQualityVideo: true };
     let status;
     let data;
     try {
@@ -135,7 +127,7 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
             validateStatus: () => true, // handle all status codes ourselves
         });
         status = resp.status;
-        data = (resp.data ?? {});
+        data = resp.data ?? {};
     }
     catch (err) {
         throw new LiveSessionError(`PUT /connection network error for ${cameraId}: ${err.message}`, err);
@@ -161,10 +153,11 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
     const localPass = typeof data.password === "string" ? data.password : "";
     const urls = Array.isArray(data.urls) ? data.urls : [];
     const bufferingTimeMs = typeof data.bufferingTime === "number" ? data.bufferingTime : 1000;
-    if (typeVal === "LOCAL" && localUser && localPass && urls.length > 0) {
+    const maxSessionDuration = typeof data.maxSessionDuration === "number" ? data.maxSessionDuration : 3600;
+    if (localUser && localPass && urls.length > 0) {
         const lanAddr = urls[0];
         const imageUrlScheme = typeof data.imageUrlScheme === "string" ? data.imageUrlScheme : undefined;
-        const proxyUrl = buildProxyUrl("LOCAL", lanAddr, imageUrlScheme);
+        const proxyUrl = buildProxyUrl(lanAddr, imageUrlScheme);
         return {
             cameraId,
             proxyUrl,
@@ -173,44 +166,14 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
             digestPassword: localPass,
             lanAddress: lanAddr,
             bufferingTimeMs,
+            maxSessionDuration,
             openedAt: Date.now(),
         };
     }
-    // ── Parse REMOTE response ───────────────────────────────────────────────────
-    if (urls.length > 0) {
-        const proxyUrl = buildProxyUrl("REMOTE", urls[0]);
-        return {
-            cameraId,
-            proxyUrl,
-            connectionType: "REMOTE",
-            digestUser: "",
-            digestPassword: "",
-            lanAddress: "",
-            bufferingTimeMs,
-            openedAt: Date.now(),
-        };
-    }
-    // Legacy REMOTE shape: { hash, proxyHost, proxyPort }
-    const hash = typeof data.hash === "string" ? data.hash : "";
-    if (hash) {
-        const proxyHost = typeof data.proxyHost === "string"
-            ? data.proxyHost
-            : "proxy-01.live.cbs.boschsecurity.com";
-        const proxyPort = typeof data.proxyPort === "number" ? data.proxyPort : 42090;
-        const proxyUrl = `https://${proxyHost}:${proxyPort}/${hash}${SNAP_SUFFIX}`;
-        return {
-            cameraId,
-            proxyUrl,
-            connectionType: "REMOTE",
-            digestUser: "",
-            digestPassword: "",
-            lanAddress: "",
-            bufferingTimeMs,
-            openedAt: Date.now(),
-        };
-    }
-    // Response 2xx but no usable URL extracted
-    throw new LiveSessionError(`PUT /connection returned HTTP ${status} but response missing proxyUrl/urls for camera ${cameraId}`);
+    // Bosch returned a 2xx but without LOCAL credentials — camera is unreachable on LAN
+    // or returned a cloud-relay (REMOTE) session. Never use cloud relay for media.
+    throw new LiveSessionError(`Bosch returned non-LOCAL session for ${cameraId} — camera unreachable on LAN. ` +
+        `ioBroker adapter does not use cloud relay; check VLAN/firewall.`);
 }
 // ── closeLiveSession ───────────────────────────────────────────────────────────
 /**

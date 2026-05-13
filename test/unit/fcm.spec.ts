@@ -38,10 +38,7 @@ import {
     type FcmDeps,
 } from "../../src/lib/fcm";
 
-import {
-    stubAxiosSequence,
-    restoreAxios,
-} from "./helpers/axios-mock";
+import { stubAxiosSequence, restoreAxios } from "./helpers/axios-mock";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,17 +79,21 @@ function makeFakeClient(connectResult: Error | undefined = undefined) {
  * Build a FcmDeps object with all dependencies stubbed.
  * Pass the overrides you care about; the rest default to "success" stubs.
  */
-function makeDeps(overrides: Partial<{
-    registerResult: ReturnType<typeof makeFakeReg> | Error;
-    fakeClient: ReturnType<typeof makeFakeClient>;
-}> = {}): { deps: FcmDeps; fakeClient: ReturnType<typeof makeFakeClient> } {
+function makeDeps(
+    overrides: Partial<{
+        registerResult: ReturnType<typeof makeFakeReg> | Error;
+        fakeClient: ReturnType<typeof makeFakeClient>;
+    }> = {},
+): { deps: FcmDeps; fakeClient: ReturnType<typeof makeFakeClient> } {
     const fakeClient = overrides.fakeClient ?? makeFakeClient();
     const registerResult = overrides.registerResult ?? makeFakeReg();
 
     const deps: FcmDeps = {
         registerToFCM: sinon.stub().resolves(registerResult) as unknown as FcmDeps["registerToFCM"],
         createFcmECDH: sinon.stub().returns(makeFakeEcdh()) as unknown as FcmDeps["createFcmECDH"],
-        generateFcmAuthSecret: sinon.stub().returns(Buffer.alloc(16, 0x11)) as unknown as FcmDeps["generateFcmAuthSecret"],
+        generateFcmAuthSecret: sinon
+            .stub()
+            .returns(Buffer.alloc(16, 0x11)) as unknown as FcmDeps["generateFcmAuthSecret"],
         FcmClient: sinon.stub().returns(fakeClient) as unknown as FcmDeps["FcmClient"],
     };
     return { deps, fakeClient };
@@ -268,8 +269,12 @@ describe("FcmListener lifecycle (real impl, injected deps)", () => {
         const fakeClient = makeFakeClient();
         const deps: FcmDeps = {
             registerToFCM: registerStub as unknown as FcmDeps["registerToFCM"],
-            createFcmECDH: sinon.stub().returns(makeFakeEcdh()) as unknown as FcmDeps["createFcmECDH"],
-            generateFcmAuthSecret: sinon.stub().returns(Buffer.alloc(16, 0x11)) as unknown as FcmDeps["generateFcmAuthSecret"],
+            createFcmECDH: sinon
+                .stub()
+                .returns(makeFakeEcdh()) as unknown as FcmDeps["createFcmECDH"],
+            generateFcmAuthSecret: sinon
+                .stub()
+                .returns(Buffer.alloc(16, 0x11)) as unknown as FcmDeps["generateFcmAuthSecret"],
             FcmClient: sinon.stub().returns(fakeClient) as unknown as FcmDeps["FcmClient"],
         };
 
@@ -312,7 +317,12 @@ describe("FcmListener — push event forwarding", () => {
         await listener.start();
 
         // Simulate a silent Bosch push (no data dict)
-        fakeClient._emit("message-data", { data: {}, from: "404630424405", fcmMessageId: "msg1", priority: "high" });
+        fakeClient._emit("message-data", {
+            data: {},
+            from: "404630424405",
+            fcmMessageId: "msg1",
+            priority: "high",
+        });
 
         expect(pushSpy.calledOnce).to.be.true;
     });
@@ -436,7 +446,14 @@ describe("FcmListener._registerWithCbs()", () => {
         const savedAdapter = axios.defaults.adapter;
         axios.defaults.adapter = (config) => {
             capturedBody = typeof config.data === "string" ? JSON.parse(config.data) : config.data;
-            return Promise.resolve({ status: 204, data: "", headers: {}, statusText: "No Content", config, request: {} } as Parameters<NonNullable<typeof axios.defaults.adapter>>[0]);
+            return Promise.resolve({
+                status: 204,
+                data: "",
+                headers: {},
+                statusText: "No Content",
+                config,
+                request: {},
+            } as Parameters<NonNullable<typeof axios.defaults.adapter>>[0]);
         };
         try {
             const listener = makeListener();
@@ -452,7 +469,14 @@ describe("FcmListener._registerWithCbs()", () => {
         const savedAdapter = axios.defaults.adapter;
         axios.defaults.adapter = (config) => {
             capturedBody = typeof config.data === "string" ? JSON.parse(config.data) : config.data;
-            return Promise.resolve({ status: 204, data: "", headers: {}, statusText: "No Content", config, request: {} } as Parameters<NonNullable<typeof axios.defaults.adapter>>[0]);
+            return Promise.resolve({
+                status: 204,
+                data: "",
+                headers: {},
+                statusText: "No Content",
+                config,
+                request: {},
+            } as Parameters<NonNullable<typeof axios.defaults.adapter>>[0]);
         };
         try {
             const listener = makeListener();
@@ -476,37 +500,45 @@ describe("FcmListener._parseNotification()", () => {
     /** Build a minimal raw notification body */
     function makeRaw(overrides: Record<string, unknown> = {}): Record<string, unknown> {
         return {
-            camera_id:   "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
+            camera_id: "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
             camera_name: "Terrasse",
-            timestamp:   "2026-05-13T14:30:00.000Z",
-            event_type:  "MOVEMENT",
-            event_tags:  [],
-            image_url:   "https://example.boschsecurity.com/img.jpg",
-            event_id:    "evt-abc123",
+            timestamp: "2026-05-13T14:30:00.000Z",
+            event_type: "MOVEMENT",
+            event_tags: [],
+            image_url: "https://example.boschsecurity.com/img.jpg",
+            event_id: "evt-abc123",
             ...overrides,
         };
     }
 
     it("parses MOVEMENT event → eventType='motion'", () => {
-        const result = listener._parseNotification(makeRaw({ event_type: "MOVEMENT", event_tags: [] }));
+        const result = listener._parseNotification(
+            makeRaw({ event_type: "MOVEMENT", event_tags: [] }),
+        );
         expect(result).to.not.be.null;
         expect(result!.eventType).to.equal("motion");
     });
 
     it("parses AUDIO_ALARM event → eventType='audio_alarm'", () => {
-        const result = listener._parseNotification(makeRaw({ event_type: "AUDIO_ALARM", event_tags: [] }));
+        const result = listener._parseNotification(
+            makeRaw({ event_type: "AUDIO_ALARM", event_tags: [] }),
+        );
         expect(result).to.not.be.null;
         expect(result!.eventType).to.equal("audio_alarm");
     });
 
     it("parses MOVEMENT + PERSON tag → eventType='person' (Gen2 DualRadar upgrade)", () => {
-        const result = listener._parseNotification(makeRaw({ event_type: "MOVEMENT", event_tags: ["PERSON"] }));
+        const result = listener._parseNotification(
+            makeRaw({ event_type: "MOVEMENT", event_tags: ["PERSON"] }),
+        );
         expect(result).to.not.be.null;
         expect(result!.eventType).to.equal("person");
     });
 
     it("parses explicit PERSON event_type → eventType='person'", () => {
-        const result = listener._parseNotification(makeRaw({ event_type: "PERSON", event_tags: [] }));
+        const result = listener._parseNotification(
+            makeRaw({ event_type: "PERSON", event_tags: [] }),
+        );
         expect(result).to.not.be.null;
         expect(result!.eventType).to.equal("person");
     });
@@ -547,11 +579,11 @@ describe("FcmListener._parseNotification()", () => {
 
     it("accepts camelCase field names (cameraId, cameraName, eventType, eventTags)", () => {
         const result = listener._parseNotification({
-            cameraId:   "cam-1",
+            cameraId: "cam-1",
             cameraName: "Indoor",
-            timestamp:  "2026-01-01T00:00:00Z",
-            eventType:  "AUDIO_ALARM",
-            eventTags:  [],
+            timestamp: "2026-01-01T00:00:00Z",
+            eventType: "AUDIO_ALARM",
+            eventTags: [],
         });
         expect(result).to.not.be.null;
         expect(result!.eventType).to.equal("audio_alarm");
@@ -610,7 +642,9 @@ describe("FcmListener — credential persistence (savedCredentials)", () => {
         const deps: FcmDeps = {
             registerToFCM: registerStub as unknown as FcmDeps["registerToFCM"],
             createFcmECDH: sinon.stub().returns(fakeEcdh) as unknown as FcmDeps["createFcmECDH"],
-            generateFcmAuthSecret: sinon.stub().returns(Buffer.alloc(16, 0x11)) as unknown as FcmDeps["generateFcmAuthSecret"],
+            generateFcmAuthSecret: sinon
+                .stub()
+                .returns(Buffer.alloc(16, 0x11)) as unknown as FcmDeps["generateFcmAuthSecret"],
             FcmClient: sinon.stub().returns(makeFakeClient()) as unknown as FcmDeps["FcmClient"],
         };
 
@@ -633,7 +667,9 @@ describe("FcmListener — credential persistence (savedCredentials)", () => {
         const listener = makeListener("tok", { mode: "ios", savedCredentials: savedCreds }, deps);
         await listener.start();
 
-        const config = registerStub.firstCall.args[0] as { acg?: { id: bigint; securityToken: bigint } };
+        const config = registerStub.firstCall.args[0] as {
+            acg?: { id: bigint; securityToken: bigint };
+        };
         expect(config.acg?.id).to.equal(BigInt("4658368044210161110"));
         expect(config.acg?.securityToken).to.equal(BigInt("6632001525114872722"));
     });
@@ -641,8 +677,12 @@ describe("FcmListener — credential persistence (savedCredentials)", () => {
     it("start() without savedCredentials calls generateFcmAuthSecret", async () => {
         const generateStub = sinon.stub().returns(Buffer.alloc(16, 0x11));
         const deps: FcmDeps = {
-            registerToFCM: sinon.stub().resolves(makeFakeReg()) as unknown as FcmDeps["registerToFCM"],
-            createFcmECDH: sinon.stub().returns(makeFakeEcdh()) as unknown as FcmDeps["createFcmECDH"],
+            registerToFCM: sinon
+                .stub()
+                .resolves(makeFakeReg()) as unknown as FcmDeps["registerToFCM"],
+            createFcmECDH: sinon
+                .stub()
+                .returns(makeFakeEcdh()) as unknown as FcmDeps["createFcmECDH"],
             generateFcmAuthSecret: generateStub as unknown as FcmDeps["generateFcmAuthSecret"],
             FcmClient: sinon.stub().returns(makeFakeClient()) as unknown as FcmDeps["FcmClient"],
         };
@@ -660,7 +700,9 @@ describe("FcmListener — credential persistence (savedCredentials)", () => {
         const listener = makeListener("tok", { mode: "android" }, deps);
 
         let emittedCreds: FcmCredentials | undefined;
-        listener.on("registered", (c: FcmCredentials) => { emittedCreds = c; });
+        listener.on("registered", (c: FcmCredentials) => {
+            emittedCreds = c;
+        });
 
         await listener.start();
 

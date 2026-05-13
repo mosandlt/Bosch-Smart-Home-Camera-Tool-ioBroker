@@ -24,32 +24,28 @@ import {
     type BoschCamera,
 } from "../../src/lib/cameras";
 
-import {
-    stubAxiosSequence,
-    stubAxiosError,
-    restoreAxios,
-} from "./helpers/axios-mock";
+import { stubAxiosSequence, stubAxiosError, restoreAxios } from "./helpers/axios-mock";
 
 // ── Test fixtures ─────────────────────────────────────────────────────────────
 
 /** Minimal valid raw camera object returned by GET /v11/video_inputs */
 const RAW_CAM_OUTDOOR: Record<string, unknown> = {
-    id:              "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
-    title:           "Terrasse",
+    id: "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
+    title: "Terrasse",
     hardwareVersion: "HOME_Eyes_Outdoor",
     firmwareVersion: "9.40.25",
 };
 
 const RAW_CAM_INDOOR: Record<string, unknown> = {
-    id:              "20E053B5-0000-0000-0000-000000000001",
-    title:           "Innenbereich",
+    id: "20E053B5-0000-0000-0000-000000000001",
+    title: "Innenbereich",
     hardwareVersion: "HOME_Eyes_Indoor",
     firmwareVersion: "9.40.25",
 };
 
 const RAW_CAM_360: Record<string, unknown> = {
-    id:              "09ECD6E9-0000-0000-0000-000000000002",
-    title:           "Kamera",
+    id: "09ECD6E9-0000-0000-0000-000000000002",
+    title: "Kamera",
     hardwareVersion: "CAMERA_360",
     firmwareVersion: "7.91.56",
 };
@@ -108,10 +104,12 @@ describe("fetchCameras() happy path", () => {
     });
 
     it("happy path: 2 cameras → returns 2 BoschCamera objects with correct fields", async () => {
-        stubAxiosSequence([{
-            status: 200,
-            data: [RAW_CAM_OUTDOOR, RAW_CAM_INDOOR],
-        }]);
+        stubAxiosSequence([
+            {
+                status: 200,
+                data: [RAW_CAM_OUTDOOR, RAW_CAM_INDOOR],
+            },
+        ]);
         const result = await fetchCameras(axios.create(), BEARER_TOKEN);
         expect(result).to.have.lengthOf(2);
 
@@ -136,10 +134,12 @@ describe("fetchCameras() happy path", () => {
     });
 
     it("happy path: mixed Gen1 + Gen2 cameras mapped correctly", async () => {
-        stubAxiosSequence([{
-            status: 200,
-            data: [RAW_CAM_OUTDOOR, RAW_CAM_360],
-        }]);
+        stubAxiosSequence([
+            {
+                status: 200,
+                data: [RAW_CAM_OUTDOOR, RAW_CAM_360],
+            },
+        ]);
         const result = await fetchCameras(axios.create(), BEARER_TOKEN);
         expect(result).to.have.lengthOf(2);
 
@@ -236,13 +236,19 @@ describe("fetchCameras() malformed/edge-case responses", () => {
     });
 
     it("camera with missing id is silently skipped", async () => {
-        stubAxiosSequence([{
-            status: 200,
-            data: [
-                { title: "No ID cam", hardwareVersion: "CAMERA_360", firmwareVersion: "7.91.56" },
-                RAW_CAM_OUTDOOR,
-            ],
-        }]);
+        stubAxiosSequence([
+            {
+                status: 200,
+                data: [
+                    {
+                        title: "No ID cam",
+                        hardwareVersion: "CAMERA_360",
+                        firmwareVersion: "7.91.56",
+                    },
+                    RAW_CAM_OUTDOOR,
+                ],
+            },
+        ]);
         const result = await fetchCameras(axios.create(), BEARER_TOKEN);
         // Only the valid cam (with id) should be returned
         expect(result).to.have.lengthOf(1);
@@ -250,32 +256,49 @@ describe("fetchCameras() malformed/edge-case responses", () => {
     });
 
     it("camera with empty string id is silently skipped", async () => {
-        stubAxiosSequence([{
-            status: 200,
-            data: [
-                { id: "", title: "Empty ID", hardwareVersion: "CAMERA_360", firmwareVersion: "7.91.56" },
-                RAW_CAM_360,
-            ],
-        }]);
+        stubAxiosSequence([
+            {
+                status: 200,
+                data: [
+                    {
+                        id: "",
+                        title: "Empty ID",
+                        hardwareVersion: "CAMERA_360",
+                        firmwareVersion: "7.91.56",
+                    },
+                    RAW_CAM_360,
+                ],
+            },
+        ]);
         const result = await fetchCameras(axios.create(), BEARER_TOKEN);
         expect(result).to.have.lengthOf(1);
         expect(result[0].id).to.equal(RAW_CAM_360.id);
     });
 
     it("missing title falls back to id", async () => {
-        stubAxiosSequence([{
-            status: 200,
-            data: [{ id: "SOME-UUID-001", hardwareVersion: "CAMERA_360", firmwareVersion: "7.91.56" }],
-        }]);
+        stubAxiosSequence([
+            {
+                status: 200,
+                data: [
+                    {
+                        id: "SOME-UUID-001",
+                        hardwareVersion: "CAMERA_360",
+                        firmwareVersion: "7.91.56",
+                    },
+                ],
+            },
+        ]);
         const result = await fetchCameras(axios.create(), BEARER_TOKEN);
         expect(result[0].name).to.equal("SOME-UUID-001");
     });
 
     it("missing hardwareVersion uses empty string (maps to Gen1)", async () => {
-        stubAxiosSequence([{
-            status: 200,
-            data: [{ id: "SOME-UUID-002", title: "Mystery Cam" }],
-        }]);
+        stubAxiosSequence([
+            {
+                status: 200,
+                data: [{ id: "SOME-UUID-002", title: "Mystery Cam" }],
+            },
+        ]);
         const result = await fetchCameras(axios.create(), BEARER_TOKEN);
         expect(result[0].hardwareVersion).to.equal("");
         expect(result[0].generation).to.equal(1);

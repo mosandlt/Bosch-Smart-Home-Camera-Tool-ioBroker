@@ -35,6 +35,8 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     private _cameras;
     /** FCM push listener (null until onReady wires it up). */
     private _fcmListener;
+    /** RTSP session watchdogs keyed by camera ID. Renew LOCAL sessions before expiry. */
+    private _sessionWatchdogs;
     /**
      * Client-side image rotation flag per camera ID.
      * Bosch Cloud API has no rotation endpoint — flag is stored here so
@@ -100,19 +102,26 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private scheduleTokenRefresh;
     /**
-     * Ensure a fresh live session exists for the given camera ID.
+     * Ensure a fresh live session exists for the given camera ID (LOCAL only).
      *
-     * Caches sessions and reuses them while they are within 75% of their
-     * bufferingTime. Opens a new session (and spawns a TLS proxy) when stale.
+     * Caches sessions and reuses them while they are within 30 s of being opened.
+     * On a fresh session, spawns a TLS proxy and arms the RTSP session watchdog
+     * so the stream renews automatically before the Bosch LOCAL session expires.
      *
-     * Note: bufferingTimeMs from Bosch is typically 500 ms (LOCAL) or 1000 ms
-     * (REMOTE). We treat it as minimum keepalive time and open a fresh session
-     * on every command if the cached one is more than 30 seconds old — a
-     * conservative threshold that avoids session-expired errors in practice.
+     * This adapter is LOCAL-only by design: cloud-relay paths are never used
+     * for media. If the camera is unreachable on the LAN, the call throws.
      *
      * @param camId
      */
     private ensureLiveSession;
+    /**
+     * Spawn (or replace) the TLS proxy for the given session and update stream_url.
+     * Extracted so both ensureLiveSession and the watchdog onRenew callback can reuse it.
+     *
+     * @param camId    Camera UUID
+     * @param session  Freshly opened LiveSession (always LOCAL)
+     */
+    private upsertSession;
     /**
      * Generate (or reuse) a PKCE pair, build the Bosch auth URL, and log it.
      *
@@ -162,6 +171,19 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private onFcmEvent;
     /**
+     * Inject a synthetic motion event for a camera.
+     *
+     * Writes last_motion_at + last_motion_event_type states exactly as FCM events do,
+     * so downstream automations that listen for Bosch motion states fire immediately
+     * without waiting for the real Bosch FCM push.
+     *
+     * Forum reference: ioBroker forum #84538 (Jaschkopf — Philips Hue in driveway).
+     *
+     * @param camId      Camera UUID
+     * @param eventType  "motion" | "person" | "audio_alarm"
+     */
+    private triggerSyntheticMotion;
+    /**
      * Fetch fresh events for all known cameras from the Bosch Cloud API.
      *
      * Called on every FCM "push" (silent wake-up — Bosch sends no event payload
@@ -202,6 +224,42 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * @param enabled
      */
     private handleLightToggle;
+    /**
+     * v0.4.0: toggle the front spotlight only, keep wallwasher untouched.
+     * Requested by ioBroker forum #84538 for dusk-sensor-driven group switching.
+     *
+     * @param camId
+     * @param enabled
+     */
+    private handleFrontLightToggle;
+    /**
+     * v0.4.0: toggle the wallwasher (Gen1) / top-down LED strip (Gen2) only,
+     * keep front spotlight untouched.
+     *
+     * @param camId
+     * @param enabled
+     */
+    private handleWallwasherToggle;
+    /** Read a boolean state with default false (treats null/undefined/non-bool as false). */
+    private _readBoolState;
+    /**
+     * Single source of truth for the lighting REST calls. All three public
+     * handlers (legacy combined, front-only, wallwasher-only) funnel through
+     * here so we only have one place that knows the Bosch endpoints.
+     *
+     * Endpoint matrix:
+     *   Gen1: PUT /v11/video_inputs/{id}/lighting_override
+     *         body: { frontLightOn, wallwasherOn, frontLightIntensity? }
+     *   Gen2: PUT /v11/video_inputs/{id}/lighting/switch/front   { enabled }
+     *         PUT /v11/video_inputs/{id}/lighting/switch/topdown { enabled }
+     *
+     * After a successful call the per-light state objects are ack'd so that
+     * `light_enabled` (legacy combined) and the two new datapoints stay in sync.
+     *
+     * @param camId
+     * @param state
+     */
+    private _applyLightingState;
     /**
      * Image rotation: pure client-side flag — no Bosch Cloud API endpoint exists.
      *

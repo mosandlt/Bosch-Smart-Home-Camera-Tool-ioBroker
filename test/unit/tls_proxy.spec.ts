@@ -73,9 +73,15 @@ L1R8PP5LDiGozNDtnlPmSQ==
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Start a TLS echo server (reflects every byte back to sender). Returns server + port. */
-function startTlsEchoServer(cert: string, key: string): Promise<{ server: tls.Server; port: number }>;
+function startTlsEchoServer(
+    cert: string,
+    key: string,
+): Promise<{ server: tls.Server; port: number }>;
 function startTlsEchoServer(): Promise<{ server: tls.Server; port: number }>;
-function startTlsEchoServer(cert: string = STATIC_CERT_PEM, key: string = STATIC_KEY_PEM): Promise<{ server: tls.Server; port: number }> {
+function startTlsEchoServer(
+    cert: string = STATIC_CERT_PEM,
+    key: string = STATIC_KEY_PEM,
+): Promise<{ server: tls.Server; port: number }> {
     return new Promise((resolve, reject) => {
         const server = tls.createServer({ cert, key }, (socket) => {
             socket.pipe(socket); // echo all data back
@@ -253,7 +259,10 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
                 resolve();
             });
             // Timeout safety
-            setTimeout(() => { sock.destroy(); resolve(); }, 2000);
+            setTimeout(() => {
+                sock.destroy();
+                resolve();
+            }, 2000);
         });
     });
 
@@ -274,9 +283,11 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
         // stop() should not hang — await with a race against a timeout
         let stopped = false;
         await Promise.race([
-            handle.stop().then(() => { stopped = true; }),
+            handle.stop().then(() => {
+                stopped = true;
+            }),
             new Promise<void>((_, reject) =>
-                setTimeout(() => reject(new Error("stop() timed out")), 3000)
+                setTimeout(() => reject(new Error("stop() timed out")), 3000),
             ),
         ]);
         expect(stopped).to.equal(true);
@@ -311,7 +322,10 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
             sock.on("close", () => resolve());
             sock.on("error", () => resolve());
             // Timeout safety
-            setTimeout(() => { sock.destroy(); resolve(); }, 3000);
+            setTimeout(() => {
+                sock.destroy();
+                resolve();
+            }, 3000);
         });
 
         // A warning should have been logged
@@ -323,9 +337,12 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
 
     it("remote drops mid-stream → client connection closes", async () => {
         // Create a TLS server that accepts and immediately destroys the socket
-        const dropServer = tls.createServer({ cert: STATIC_CERT_PEM, key: STATIC_KEY_PEM }, (socket) => {
-            setTimeout(() => socket.destroy(), 100);
-        });
+        const dropServer = tls.createServer(
+            { cert: STATIC_CERT_PEM, key: STATIC_KEY_PEM },
+            (socket) => {
+                setTimeout(() => socket.destroy(), 100);
+            },
+        );
         const dropPort = await new Promise<number>((res, rej) => {
             dropServer.on("error", rej);
             dropServer.listen(0, "127.0.0.1", () => {
@@ -349,7 +366,10 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
                 resolve();
             });
             sock.on("error", () => resolve());
-            setTimeout(() => { sock.destroy(); resolve(); }, 3000);
+            setTimeout(() => {
+                sock.destroy();
+                resolve();
+            }, 3000);
         });
 
         dropServer.close();
@@ -411,7 +431,10 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
                 const s = net.createConnection({ host: "127.0.0.1", port: handle.port });
                 s.on("close", () => res());
                 s.on("error", () => res());
-                setTimeout(() => { s.destroy(); res(); }, 2000);
+                setTimeout(() => {
+                    s.destroy();
+                    res();
+                }, 2000);
             });
             // small gap so timestamps are clearly within _BURST_WINDOW
             await new Promise((r) => setTimeout(r, 50));
@@ -429,8 +452,14 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
         await new Promise<void>((resolve) => {
             const s = net.createConnection({ host: "127.0.0.1", port: handle.port });
             s.on("error", () => resolve());
-            s.on("connect", () => { s.destroy(); resolve(); });
-            setTimeout(() => { s.destroy(); resolve(); }, 2000);
+            s.on("connect", () => {
+                s.destroy();
+                resolve();
+            });
+            setTimeout(() => {
+                s.destroy();
+                resolve();
+            }, 2000);
         });
     });
 });

@@ -1,18 +1,18 @@
 /**
- * Bosch Cloud Live-Session opener.
+ * Bosch Cloud Live-Session opener — LOCAL only.
  *
  * Opens a per-camera proxy session via:
  *   PUT https://residential.cbs.boschsecurity.com/v11/video_inputs/{id}/connection
  *
- * Response shapes (from HA __init__.py _try_live_connection_inner):
+ * Response shape (LOCAL, 200/201):
+ *   { "user": "cbs-XXXXXX", "password": "...", "urls": ["192.168.x.x:443"],
+ *     "imageUrlScheme": "https://{url}/snap.jpg", "bufferingTime": 500,
+ *     "maxSessionDuration": 3600, ... }
  *
- *   LOCAL (200/201):
- *     { "user": "cbs-XXXXXX", "password": "...", "urls": ["192.168.x.x:443"],
- *       "imageUrlScheme": "https://{url}/snap.jpg", "bufferingTime": 500, ... }
- *
- *   REMOTE (200/201):
- *     { "urls": ["proxy-NN:42090/{hash}"], "bufferingTime": 1000, ... }
- *     — or legacy shape: { "hash": "...", "proxyHost": "...", "proxyPort": 42090, ... }
+ * DESIGN CONSTRAINT (v0.4.0): This adapter NEVER uses Bosch's cloud media relay
+ * (proxy-NN.live.cbs.boschsecurity.com:42090). Cloud REST calls for login /
+ * discovery / control are fine — only media paths must go LOCAL.
+ * If Bosch returns a non-LOCAL session, an error is thrown.
  *
  * Error codes:
  *   401 → token expired (caller must refresh and retry)
@@ -49,60 +49,69 @@ export declare class CameraOfflineError extends Error {
 export declare class SessionLimitError extends Error {
     constructor(message: string);
 }
-/** Result of a successful openLiveSession() call. */
+/** Result of a successful openLiveSession() call. Always LOCAL. */
 export interface LiveSession {
     /** UUID of the camera (echoed back from the call arguments). */
     cameraId: string;
     /**
      * Full snapshot URL.
-     * LOCAL:  https://<lan-ip>:443/snap.jpg?JpegSize=1206
-     * REMOTE: https://proxy-NN.live.cbs.boschsecurity.com:42090/<hash>/snap.jpg?JpegSize=1206
+     * Always LOCAL: https://<lan-ip>:443/snap.jpg?JpegSize=1206
      */
     proxyUrl: string;
-    /** Connection type as established by Bosch. */
-    connectionType: "LOCAL" | "REMOTE";
+    /**
+     * Connection type — always "LOCAL" in this adapter.
+     * Cloud relay paths are removed by design (v0.4.0).
+     */
+    readonly connectionType: "LOCAL";
     /**
      * Digest username for LOCAL connections (e.g. "cbs-57355237").
-     * Empty string for REMOTE connections (URL hash is the credential).
      */
     digestUser: string;
     /**
      * Digest password for LOCAL connections.
-     * Empty string for REMOTE connections.
      */
     digestPassword: string;
     /**
      * LAN address returned by Bosch for LOCAL connections (e.g. "192.0.2.10:443").
-     * Empty string for REMOTE connections.
      */
     lanAddress: string;
     /**
      * Session lifetime hint in milliseconds (from Bosch "bufferingTime" field).
-     * Typical: 500 ms for LOCAL, 1000 ms for REMOTE.
+     * Typical: 500 ms for LOCAL connections.
      */
     bufferingTimeMs: number;
+    /**
+     * Maximum session duration in seconds (from Bosch "maxSessionDuration" field).
+     * Default: 3600 s if absent in the response.
+     * The RTSP watchdog uses this to schedule session renewal ~60 s before expiry.
+     */
+    maxSessionDuration: number;
     /** When this session was opened (Date.now() epoch ms). */
     openedAt: number;
 }
 /**
- * Open a live proxy session for a camera.
+ * Open a LOCAL live proxy session for a camera.
  *
  * Calls PUT /v11/video_inputs/{cameraId}/connection with body:
- *   { "type": <mode>, "highQualityVideo": true }
+ *   { "type": "LOCAL", "highQualityVideo": true }
  *
- * Returns a LiveSession containing the proxyUrl (for snap.jpg / RCP+)
- * and Digest credentials (LOCAL only).
+ * Returns a LiveSession containing the LOCAL proxyUrl (for snap.jpg / RCP+)
+ * and Digest credentials.
+ *
+ * IMPORTANT: This adapter is LOCAL-only by design. If Bosch returns a
+ * non-LOCAL session (e.g. because the camera is unreachable on the LAN),
+ * a LiveSessionError is thrown. The cloud relay at
+ * proxy-NN.live.cbs.boschsecurity.com:42090 is NEVER used for media.
  *
  * @param httpClient  Axios instance (caller controls SSL/timeout options)
  * @param token       Bearer access token
  * @param cameraId    Camera UUID
- * @param mode        Preferred connection type (default "AUTO")
- * @returns LiveSession on success
+ * @returns LiveSession on success (always LOCAL)
  * @throws CameraOfflineError  when camera is offline / privacy mode on (503, 443-privacy)
  * @throws SessionLimitError   when Bosch quota hit (444)
- * @throws LiveSessionError    on 401, 404, 5xx, network, or malformed response
+ * @throws LiveSessionError    on 401, 404, 5xx, network, non-LOCAL response, or malformed response
  */
-export declare function openLiveSession(httpClient: AxiosInstance, token: string, cameraId: string, mode?: "AUTO" | "LOCAL_ONLY" | "REMOTE_ONLY"): Promise<LiveSession>;
+export declare function openLiveSession(httpClient: AxiosInstance, token: string, cameraId: string): Promise<LiveSession>;
 /**
  * Close an open live session (cleanup on adapter unload).
  *

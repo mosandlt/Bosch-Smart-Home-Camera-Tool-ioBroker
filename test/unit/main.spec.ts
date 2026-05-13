@@ -37,10 +37,7 @@ import { expect } from "chai";
 import * as sinon from "sinon";
 import * as path from "path";
 
-import {
-    stubAxiosSequence,
-    restoreAxios,
-} from "./helpers/axios-mock";
+import { stubAxiosSequence, restoreAxios } from "./helpers/axios-mock";
 
 // Type-only imports — not loaded at runtime
 import type { MockDatabase } from "@iobroker/testing/build/tests/unit/mocks/mockDatabase";
@@ -50,19 +47,19 @@ import type { MockAdapter } from "@iobroker/testing/build/tests/unit/mocks/mockA
 
 /** Minimal Keycloak token response body */
 const TOKEN_BODY = {
-    access_token:       "acc.tok.fresh",
-    refresh_token:      "ref.tok.fresh",
-    expires_in:         300,
+    access_token: "acc.tok.fresh",
+    refresh_token: "ref.tok.fresh",
+    expires_in: 300,
     refresh_expires_in: 86400,
-    token_type:         "Bearer",
-    scope:              "email offline_access profile openid",
+    token_type: "Bearer",
+    scope: "email offline_access profile openid",
 };
 
 /** Minimal camera list response body */
 const CAMERAS_BODY = [
     {
-        id:              "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
-        title:           "Terrasse",
+        id: "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
+        title: "Terrasse",
         hardwareVersion: "HOME_Eyes_Outdoor",
         firmwareVersion: "9.40.25",
     },
@@ -72,12 +69,14 @@ const CAMERAS_BODY = [
  * Simulated Bosch redirect URL — what the user pastes after browser login.
  * Contains a valid `code` query parameter.
  */
-const REDIRECT_URL_WITH_CODE = "https://www.bosch.com/boschcam?code=AUTH_CODE_123&state=randomstate123";
+const REDIRECT_URL_WITH_CODE =
+    "https://www.bosch.com/boschcam?code=AUTH_CODE_123&state=randomstate123";
 
 /**
  * Redirect URL with an error — simulates failed login or user denied access.
  */
-const REDIRECT_URL_WITH_ERROR = "https://www.bosch.com/boschcam?error=access_denied&state=randomstate123";
+const REDIRECT_URL_WITH_ERROR =
+    "https://www.bosch.com/boschcam?error=access_denied&state=randomstate123";
 
 /**
  * Fake PKCE verifier stored from a previous adapter start.
@@ -87,32 +86,32 @@ const STORED_PKCE_VERIFIER = "fakepkceverifier1234567890abcdefghijklmnopqrstuvwx
 
 // ── Paths ──────────────────────────────────────────────────────────────────────
 
-const REPO_ROOT         = path.resolve(__dirname, "..", "..");
-const MAIN_JS_PATH      = path.join(REPO_ROOT, "build", "main.js");
+const REPO_ROOT = path.resolve(__dirname, "..", "..");
+const MAIN_JS_PATH = path.join(REPO_ROOT, "build", "main.js");
 const ADAPTER_CORE_PATH = require.resolve("@iobroker/adapter-core");
 
 // ── Mock modules (loaded via CommonJS require, not ES import) ─────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-const { MockDatabase: MockDatabaseCtor } = require(
-    "@iobroker/testing/build/tests/unit/mocks/mockDatabase"
-) as { MockDatabase: new () => MockDatabase };
+const { MockDatabase: MockDatabaseCtor } =
+    require("@iobroker/testing/build/tests/unit/mocks/mockDatabase") as {
+        MockDatabase: new () => MockDatabase;
+    };
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-const { mockAdapterCore: mockAdapterCoreFn } = require(
-    "@iobroker/testing/build/tests/unit/mocks/mockAdapterCore"
-) as {
-    mockAdapterCore: (
-        db: MockDatabase,
-        opts?: { onAdapterCreated?: (a: MockAdapter) => void },
-    ) => unknown;
-};
+const { mockAdapterCore: mockAdapterCoreFn } =
+    require("@iobroker/testing/build/tests/unit/mocks/mockAdapterCore") as {
+        mockAdapterCore: (
+            db: MockDatabase,
+            opts?: { onAdapterCreated?: (a: MockAdapter) => void },
+        ) => unknown;
+    };
 
 // ── Adapter factory ────────────────────────────────────────────────────────────
 
 type TestAdapter = MockAdapter & {
-    readyHandler?:       () => Promise<void>;
-    unloadHandler?:      (cb: () => void) => void;
+    readyHandler?: () => Promise<void>;
+    unloadHandler?: (cb: () => void) => void;
     stateChangeHandler?: ioBroker.StateChangeHandler;
 };
 
@@ -128,27 +127,29 @@ type TestAdapter = MockAdapter & {
  *   - this.terminate    (mock version throws; stubbed as no-op so onReady doesn't crash)
  */
 function createAdapter(configOverrides: Record<string, unknown> = {}): {
-    db:      MockDatabase;
+    db: MockDatabase;
     adapter: TestAdapter;
 } {
     const db = new MockDatabaseCtor();
     let capturedAdapter: MockAdapter | null = null;
 
     const core = mockAdapterCoreFn(db, {
-        onAdapterCreated: (a: MockAdapter) => { capturedAdapter = a; },
+        onAdapterCreated: (a: MockAdapter) => {
+            capturedAdapter = a;
+        },
     });
 
     // Inject mock core into require.cache BEFORE requiring main.js
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (require.cache as any)[ADAPTER_CORE_PATH] = {
-        id:       ADAPTER_CORE_PATH,
+        id: ADAPTER_CORE_PATH,
         filename: ADAPTER_CORE_PATH,
-        loaded:   true,
-        parent:   module,
+        loaded: true,
+        parent: module,
         children: [],
-        path:     path.dirname(ADAPTER_CORE_PATH),
-        paths:    [],
-        exports:  core,
+        path: path.dirname(ADAPTER_CORE_PATH),
+        paths: [],
+        exports: core,
     };
 
     // Clear main.js so it re-evaluates with the fresh mock core
@@ -159,7 +160,7 @@ function createAdapter(configOverrides: Record<string, unknown> = {}): {
     factory({
         config: {
             redirect_url: "",
-            region:       "EU",
+            region: "EU",
             ...configOverrides,
         },
     });
@@ -172,7 +173,7 @@ function createAdapter(configOverrides: Record<string, unknown> = {}): {
 
     // Stub methods that the @iobroker/testing mock omits:
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).setTimeout   = (_fn: () => void, _ms: number) => null;
+    (adapter as any).setTimeout = (_fn: () => void, _ms: number) => null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).clearTimeout = (_handle: unknown) => undefined;
     // The mock's terminate() throws an Error object which propagates from onReady;
@@ -196,7 +197,6 @@ function getStateVal(db: MockDatabase, adapter: TestAdapter, id: string): unknow
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("main adapter — lifecycle", () => {
-
     afterEach(() => {
         restoreAxios();
     });
@@ -225,8 +225,14 @@ describe("main adapter — lifecycle", () => {
         });
 
         // Pre-store a PKCE verifier so the adapter can complete the exchange
-        db.publishState(`${adapter.namespace}.info.pkce_verifier`, { val: STORED_PKCE_VERIFIER, ack: true });
-        db.publishState(`${adapter.namespace}.info.pkce_state`,    { val: "randomstate123",    ack: true });
+        db.publishState(`${adapter.namespace}.info.pkce_verifier`, {
+            val: STORED_PKCE_VERIFIER,
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.info.pkce_state`, {
+            val: "randomstate123",
+            ack: true,
+        });
 
         await adapter.readyHandler!();
 
@@ -271,14 +277,26 @@ describe("main adapter — lifecycle", () => {
 
         // Pre-populate token states (simulates a previous run)
         const futureExpiry = Date.now() + 200_000; // 200s from now, well within validity
-        db.publishState(`${adapter.namespace}.info.access_token`,     { val: "stored.access.token",  ack: true });
-        db.publishState(`${adapter.namespace}.info.refresh_token`,    { val: "stored.refresh.token", ack: true });
-        db.publishState(`${adapter.namespace}.info.token_expires_at`, { val: futureExpiry,            ack: true });
+        db.publishState(`${adapter.namespace}.info.access_token`, {
+            val: "stored.access.token",
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.info.refresh_token`, {
+            val: "stored.refresh.token",
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.info.token_expires_at`, {
+            val: futureExpiry,
+            ack: true,
+        });
 
         await adapter.readyHandler!();
 
         // Connection should be true (existing tokens were reused, cameras fetched)
-        expect(getStateVal(db, adapter, "info.connection"), "info.connection should be true").to.equal(true);
+        expect(
+            getStateVal(db, adapter, "info.connection"),
+            "info.connection should be true",
+        ).to.equal(true);
 
         // Token should still be the stored one (no login happened)
         expect(
@@ -297,12 +315,20 @@ describe("main adapter — lifecycle", () => {
         ]);
 
         const { db, adapter } = createAdapter({ redirect_url: REDIRECT_URL_WITH_CODE });
-        db.publishState(`${adapter.namespace}.info.pkce_verifier`, { val: STORED_PKCE_VERIFIER, ack: true });
-        db.publishState(`${adapter.namespace}.info.pkce_state`,    { val: "randomstate123",    ack: true });
+        db.publishState(`${adapter.namespace}.info.pkce_verifier`, {
+            val: STORED_PKCE_VERIFIER,
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.info.pkce_state`, {
+            val: "randomstate123",
+            ack: true,
+        });
         await adapter.readyHandler!();
 
         // Confirm adapter is connected after onReady
-        expect(getStateVal(db, adapter, "info.connection"), "connected after onReady").to.equal(true);
+        expect(getStateVal(db, adapter, "info.connection"), "connected after onReady").to.equal(
+            true,
+        );
 
         // Now call unload
         let callbackCalled = false;
@@ -362,7 +388,10 @@ describe("main adapter — lifecycle", () => {
         // REDIRECT_URL_WITH_ERROR has ?error=access_denied — extractCode() returns null
         // No HTTP calls needed (code extraction fails before any network call)
         const { db, adapter } = createAdapter({ redirect_url: REDIRECT_URL_WITH_ERROR });
-        db.publishState(`${adapter.namespace}.info.pkce_verifier`, { val: STORED_PKCE_VERIFIER, ack: true });
+        db.publishState(`${adapter.namespace}.info.pkce_verifier`, {
+            val: STORED_PKCE_VERIFIER,
+            ack: true,
+        });
 
         let threw = false;
         try {
@@ -406,8 +435,14 @@ describe("main adapter — lifecycle", () => {
         const { db, adapter } = createAdapter({ redirect_url: "" });
 
         // Pre-populate an existing verifier — adapter should reuse it
-        db.publishState(`${adapter.namespace}.info.pkce_verifier`, { val: STORED_PKCE_VERIFIER, ack: true });
-        db.publishState(`${adapter.namespace}.info.pkce_state`,    { val: "existingstate456",  ack: true });
+        db.publishState(`${adapter.namespace}.info.pkce_verifier`, {
+            val: STORED_PKCE_VERIFIER,
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.info.pkce_state`, {
+            val: "existingstate456",
+            ack: true,
+        });
 
         let threw = false;
         try {
@@ -441,34 +476,37 @@ describe("main adapter — lifecycle", () => {
 describe("main adapter — v0.2.0 command handlers", () => {
     // Resolved paths for the build/ lib modules (used as require.cache keys)
     const LIVE_SESSION_PATH = path.join(REPO_ROOT, "build", "lib", "live_session.js");
-    const RCP_PATH          = path.join(REPO_ROOT, "build", "lib", "rcp.js");
-    const SNAPSHOT_PATH     = path.join(REPO_ROOT, "build", "lib", "snapshot.js");
-    const TLS_PROXY_PATH    = path.join(REPO_ROOT, "build", "lib", "tls_proxy.js");
-    const FCM_PATH          = path.join(REPO_ROOT, "build", "lib", "fcm.js");
+    const RCP_PATH = path.join(REPO_ROOT, "build", "lib", "rcp.js");
+    const SNAPSHOT_PATH = path.join(REPO_ROOT, "build", "lib", "snapshot.js");
+    const TLS_PROXY_PATH = path.join(REPO_ROOT, "build", "lib", "tls_proxy.js");
+    const FCM_PATH = path.join(REPO_ROOT, "build", "lib", "fcm.js");
+    const SESSION_WATCHDOG_PATH = path.join(REPO_ROOT, "build", "lib", "session_watchdog.js");
 
     // Real module exports (loaded once so we can restore after each test)
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     const realLiveSession = require(LIVE_SESSION_PATH) as object;
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const realRcp         = require(RCP_PATH)          as object;
+    const realRcp = require(RCP_PATH) as object;
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const realSnapshot    = require(SNAPSHOT_PATH)     as object;
+    const realSnapshot = require(SNAPSHOT_PATH) as object;
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const realTlsProxy    = require(TLS_PROXY_PATH)    as object;
+    const realTlsProxy = require(TLS_PROXY_PATH) as object;
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const realFcm         = require(FCM_PATH)          as object;
+    const realFcm = require(FCM_PATH) as object;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+    const realSessionWatchdog = require(SESSION_WATCHDOG_PATH) as object;
 
     /** Inject a fake module into require.cache at the given resolved path. */
     function injectModule(resolvedPath: string, exports: object): void {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (require.cache as any)[resolvedPath] = {
-            id:       resolvedPath,
+            id: resolvedPath,
             filename: resolvedPath,
-            loaded:   true,
-            parent:   module,
+            loaded: true,
+            parent: module,
             children: [],
-            path:     path.dirname(resolvedPath),
-            paths:    [],
+            path: path.dirname(resolvedPath),
+            paths: [],
             exports,
         };
     }
@@ -487,10 +525,11 @@ describe("main adapter — v0.2.0 command handlers", () => {
         sinon.restore();
         // Restore real modules
         restoreModule(LIVE_SESSION_PATH, realLiveSession);
-        restoreModule(RCP_PATH,          realRcp);
-        restoreModule(SNAPSHOT_PATH,     realSnapshot);
-        restoreModule(TLS_PROXY_PATH,    realTlsProxy);
-        restoreModule(FCM_PATH,          realFcm);
+        restoreModule(RCP_PATH, realRcp);
+        restoreModule(SNAPSHOT_PATH, realSnapshot);
+        restoreModule(TLS_PROXY_PATH, realTlsProxy);
+        restoreModule(FCM_PATH, realFcm);
+        restoreModule(SESSION_WATCHDOG_PATH, realSessionWatchdog);
     });
 
     /**
@@ -502,42 +541,50 @@ describe("main adapter — v0.2.0 command handlers", () => {
      *   - startTlsProxy returns a dummy handle
      *   - FcmListener.start() throws FcmNotImplementedError (stub behaviour)
      */
-    function createAdapterWithMocks(opts: {
-        openLiveSession?: sinon.SinonStub;
-        sendRcpCommand?:  sinon.SinonStub;
-        fetchSnapshot?:   sinon.SinonStub;
-        startTlsProxy?:   sinon.SinonStub;
-        fcmStart?:        sinon.SinonStub;
-        closeLiveSession?: sinon.SinonStub;
-        /** Extra HTTP responses appended AFTER the CAMERAS_BODY response. */
-        extraAxiosResponses?: Array<Partial<{ status: number; data: unknown; headers: Record<string, string | string[]> }>>;
-    } = {}): { db: MockDatabase; adapter: TestAdapter } {
+    function createAdapterWithMocks(
+        opts: {
+            openLiveSession?: sinon.SinonStub;
+            sendRcpCommand?: sinon.SinonStub;
+            fetchSnapshot?: sinon.SinonStub;
+            startTlsProxy?: sinon.SinonStub;
+            fcmStart?: sinon.SinonStub;
+            closeLiveSession?: sinon.SinonStub;
+            /** Extra HTTP responses appended AFTER the CAMERAS_BODY response. */
+            extraAxiosResponses?: Array<
+                Partial<{
+                    status: number;
+                    data: unknown;
+                    headers: Record<string, string | string[]>;
+                }>
+            >;
+        } = {},
+    ): { db: MockDatabase; adapter: TestAdapter } {
         // ── Fake live session (LOCAL) ──────────────────────────────────────────
         const fakeSession = {
-            cameraId:       "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
-            proxyUrl:       "https://192.0.2.10:443/snap.jpg?JpegSize=1206",
+            cameraId: "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
+            proxyUrl: "https://192.0.2.10:443/snap.jpg?JpegSize=1206",
             connectionType: "LOCAL" as const,
-            digestUser:     "cbs-testuser",
+            digestUser: "cbs-testuser",
             digestPassword: "testpassword",
-            lanAddress:     "192.0.2.10:443",
+            lanAddress: "192.0.2.10:443",
             bufferingTimeMs: 500,
-            openedAt:       Date.now(),
+            maxSessionDuration: 3600,
+            openedAt: Date.now(),
         };
 
-        const openLiveSessionStub = opts.openLiveSession
-            ?? sinon.stub().resolves(fakeSession);
-        const closeLiveSessionStub = opts.closeLiveSession
-            ?? sinon.stub().resolves(undefined);
-        const sendRcpCommandStub = opts.sendRcpCommand
-            ?? sinon.stub().resolves({ payload: Buffer.alloc(0) });
-        const fetchSnapshotStub = opts.fetchSnapshot
-            ?? sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff])); // minimal JPEG header
+        const openLiveSessionStub = opts.openLiveSession ?? sinon.stub().resolves(fakeSession);
+        const closeLiveSessionStub = opts.closeLiveSession ?? sinon.stub().resolves(undefined);
+        const sendRcpCommandStub =
+            opts.sendRcpCommand ?? sinon.stub().resolves({ payload: Buffer.alloc(0) });
+        const fetchSnapshotStub =
+            opts.fetchSnapshot ?? sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff])); // minimal JPEG header
         const tlsStopStub = sinon.stub().resolves(undefined);
-        const startTlsProxyStub = opts.startTlsProxy
-            ?? sinon.stub().resolves({
-                port:         54321,
+        const startTlsProxyStub =
+            opts.startTlsProxy ??
+            sinon.stub().resolves({
+                port: 54321,
                 localRtspUrl: "rtsp://127.0.0.1:54321/rtsp_tunnel",
-                stop:         tlsStopStub,
+                stop: tlsStopStub,
             });
 
         // ── FCM stub class ─────────────────────────────────────────────────────
@@ -555,16 +602,16 @@ describe("main adapter — v0.2.0 command handlers", () => {
         class FakeFcmListener extends EventEmitter {
             // Default: throw FakeFcmCbsRegistrationError to exercise error handling
             start = opts.fcmStart ?? sinon.stub().rejects(new FakeFcmCbsRegistrationError());
-            stop  = sinon.stub().resolves(undefined);
+            stop = sinon.stub().resolves(undefined);
         }
 
         // ── Inject mocked modules into require.cache ───────────────────────────
         injectModule(LIVE_SESSION_PATH, {
-            openLiveSession:    openLiveSessionStub,
-            closeLiveSession:   closeLiveSessionStub,
-            LiveSessionError:   class extends Error {},
+            openLiveSession: openLiveSessionStub,
+            closeLiveSession: closeLiveSessionStub,
+            LiveSessionError: class extends Error {},
             CameraOfflineError: class extends Error {},
-            SessionLimitError:  class extends Error {},
+            SessionLimitError: class extends Error {},
         });
 
         // Keep real RCP builders but stub sendRcpCommand
@@ -575,7 +622,7 @@ describe("main adapter — v0.2.0 command handlers", () => {
         });
 
         injectModule(SNAPSHOT_PATH, {
-            fetchSnapshot:    fetchSnapshotStub,
+            fetchSnapshot: fetchSnapshotStub,
             buildSnapshotUrl: (proxyUrl: string) => {
                 const base = proxyUrl.replace(/\/+$/, "").replace(/\/snap\.jpg.*$/, "");
                 return `${base}/snap.jpg?JpegSize=1206`;
@@ -588,20 +635,36 @@ describe("main adapter — v0.2.0 command handlers", () => {
         });
 
         injectModule(FCM_PATH, {
-            FcmListener:             FakeFcmListener,
+            FcmListener: FakeFcmListener,
             FcmCbsRegistrationError: FakeFcmCbsRegistrationError,
-            CLOUD_API:               "https://residential.cbs.boschsecurity.com",
-            FCM_SENDER_ID:           "404630424405",
+            CLOUD_API: "https://residential.cbs.boschsecurity.com",
+            FCM_SENDER_ID: "404630424405",
+        });
+
+        // Inject a no-op SessionWatchdog so tests don't arm real setTimeout timers
+        // that could prevent mocha from exiting cleanly.
+        class FakeSessionWatchdog {
+            start(): void {
+                /* no-op */
+            }
+            stop(): void {
+                /* no-op */
+            }
+            isRunning(): boolean {
+                return false;
+            }
+        }
+        injectModule(SESSION_WATCHDOG_PATH, {
+            SessionWatchdog: FakeSessionWatchdog,
         });
 
         // ── Create adapter with stored tokens (skips real login) ───────────────
         // Stub axios for camera discovery (no live-session calls needed in onReady),
         // plus any extra responses the test wants to provide for later HTTP calls
         // (e.g. cloud-API PUT /privacy in handlePrivacyToggle).
-        const axiosSeq: Array<Partial<{ status: number; data: unknown; headers: Record<string, string | string[]> }>> = [
-            { status: 200, data: CAMERAS_BODY },
-            ...(opts.extraAxiosResponses ?? []),
-        ];
+        const axiosSeq: Array<
+            Partial<{ status: number; data: unknown; headers: Record<string, string | string[]> }>
+        > = [{ status: 200, data: CAMERAS_BODY }, ...(opts.extraAxiosResponses ?? [])];
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         stubAxiosSequence(axiosSeq as any);
 
@@ -609,9 +672,15 @@ describe("main adapter — v0.2.0 command handlers", () => {
 
         // Pre-populate valid tokens so onReady skips login
         const futureExpiry = Date.now() + 200_000;
-        db.publishState(`${adapter.namespace}.info.access_token`,     { val: "stored.tok", ack: true });
-        db.publishState(`${adapter.namespace}.info.refresh_token`,    { val: "stored.ref", ack: true });
-        db.publishState(`${adapter.namespace}.info.token_expires_at`, { val: futureExpiry,  ack: true });
+        db.publishState(`${adapter.namespace}.info.access_token`, { val: "stored.tok", ack: true });
+        db.publishState(`${adapter.namespace}.info.refresh_token`, {
+            val: "stored.ref",
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.info.token_expires_at`, {
+            val: futureExpiry,
+            ack: true,
+        });
 
         return { db, adapter };
     }
@@ -630,7 +699,13 @@ describe("main adapter — v0.2.0 command handlers", () => {
         // Simulate user writing cameras.<id>.privacy_enabled = true (ack=false)
         const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.privacy_enabled`;
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
 
         // State should be ack'd after successful PUT
         const state = db.getState(stateId) as ioBroker.State | undefined;
@@ -657,7 +732,13 @@ describe("main adapter — v0.2.0 command handlers", () => {
 
         const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
 
         // fetchSnapshot must have been called
         expect(fetchSnapshot.callCount, "fetchSnapshot called once").to.be.greaterThanOrEqual(1);
@@ -666,9 +747,9 @@ describe("main adapter — v0.2.0 command handlers", () => {
         expect(writeFileStub.callCount, "writeFileAsync called once").to.be.greaterThanOrEqual(1);
 
         // snapshot_path state should be set
-        const pathState = db.getState(
-            `${adapter.namespace}.cameras.${camId}.snapshot_path`
-        ) as ioBroker.State | undefined;
+        const pathState = db.getState(`${adapter.namespace}.cameras.${camId}.snapshot_path`) as
+            | ioBroker.State
+            | undefined;
         expect(pathState?.val, "snapshot_path state set").to.be.a("string");
         expect(
             (pathState?.val as string).includes(camId),
@@ -707,11 +788,11 @@ describe("main adapter — v0.2.0 command handlers", () => {
     // ── Test 9: onUnload cleanup ──────────────────────────────────────────────
 
     it("onUnload: stops TLS proxies, FCM listener, and closes live sessions", async () => {
-        const tlsStopStub    = sinon.stub().resolves(undefined);
-        const startTlsProxy  = sinon.stub().resolves({
-            port:         44444,
+        const tlsStopStub = sinon.stub().resolves(undefined);
+        const startTlsProxy = sinon.stub().resolves({
+            port: 44444,
             localRtspUrl: "rtsp://127.0.0.1:44444/rtsp_tunnel",
-            stop:         tlsStopStub,
+            stop: tlsStopStub,
         });
         const closeLiveSession = sinon.stub().resolves(undefined);
 
@@ -728,7 +809,13 @@ describe("main adapter — v0.2.0 command handlers", () => {
         if (writeFileStub && typeof writeFileStub.resolves === "function") {
             writeFileStub.resolves(undefined);
         }
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
 
         // Now unload
         let cbCalled = false;
@@ -744,10 +831,15 @@ describe("main adapter — v0.2.0 command handlers", () => {
         expect(cbCalled, "unload callback must be called").to.equal(true);
 
         // TLS proxy must have been stopped
-        expect(tlsStopStub.callCount, "TLS proxy stop() called on unload").to.be.greaterThanOrEqual(1);
+        expect(tlsStopStub.callCount, "TLS proxy stop() called on unload").to.be.greaterThanOrEqual(
+            1,
+        );
 
         // Live session must have been closed
-        expect(closeLiveSession.callCount, "closeLiveSession called on unload").to.be.greaterThanOrEqual(1);
+        expect(
+            closeLiveSession.callCount,
+            "closeLiveSession called on unload",
+        ).to.be.greaterThanOrEqual(1);
 
         // info.connection should end up false
         expect(
@@ -776,16 +868,22 @@ describe("main adapter — v0.2.0 command handlers", () => {
 
         await adapter.readyHandler!();
 
-        const camId  = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.image_rotation_180`;
 
         // Trigger: user sets image_rotation_180 = true
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
 
         // State must be ack'd with the requested value
         const state = db.getState(stateId) as ioBroker.State | undefined;
-        expect(state?.ack,  "image_rotation_180 state must be ack'd").to.equal(true);
-        expect(state?.val,  "image_rotation_180 state value must be true").to.equal(true);
+        expect(state?.ack, "image_rotation_180 state must be ack'd").to.equal(true);
+        expect(state?.val, "image_rotation_180 state value must be true").to.equal(true);
 
         // sendRcpCommand must NEVER have been called (no RCP+ for rotation)
         expect(
@@ -794,7 +892,13 @@ describe("main adapter — v0.2.0 command handlers", () => {
         ).to.equal(0);
 
         // Toggle off
-        await adapter.stateChangeHandler!(stateId, { val: false, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: false,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
 
         const stateOff = db.getState(stateId) as ioBroker.State | undefined;
         expect(stateOff?.ack, "image_rotation_180 OFF state must be ack'd").to.equal(true);
@@ -834,10 +938,16 @@ describe("main adapter — v0.2.0 command handlers", () => {
         const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
         if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
 
-        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.privacy_enabled`;
 
-        await adapter.stateChangeHandler!(stateId, { val: false, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: false,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         await flushAutoSnapshot();
 
         expect(
@@ -859,10 +969,16 @@ describe("main adapter — v0.2.0 command handlers", () => {
         await flushAutoSnapshot();
         fetchSnapshotStub.resetHistory();
 
-        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.privacy_enabled`;
 
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         await flushAutoSnapshot();
 
         expect(
@@ -886,10 +1002,16 @@ describe("main adapter — v0.2.0 command handlers", () => {
         const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
         if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
 
-        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.light_enabled`;
 
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         await flushAutoSnapshot();
 
         expect(
@@ -915,10 +1037,16 @@ describe("main adapter — v0.2.0 command handlers", () => {
         const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
         if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
 
-        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
 
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
 
         const online = db.getState(`${adapter.namespace}.cameras.${camId}.online`) as
             | ioBroker.State
@@ -929,8 +1057,14 @@ describe("main adapter — v0.2.0 command handlers", () => {
     it("camera flips to offline only after OFFLINE_THRESHOLD consecutive snapshot failures", async () => {
         // 1st call succeeds (camera proven online), then non-transient failures so retry
         // doesn't kick in. Each ioBroker stateChange → snapshot_trigger → 1 fetchSnapshot call.
+        //
+        // NOTE: onReady fires one startup snapshot as void fire-and-forget. That snapshot
+        // may complete before or after the first explicit stateChange trigger, so we allow
+        // both call #0 and call #1 to succeed (flushAutoSnapshot ensures the startup
+        // snapshot completes before we begin counting failures).
         const fetchSnapshotStub = sinon.stub();
-        fetchSnapshotStub.onCall(0).resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        fetchSnapshotStub.onCall(0).resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])); // startup snap
+        fetchSnapshotStub.onCall(1).resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])); // trigger #1 success
         fetchSnapshotStub.rejects(new Error("HTTP 401: snapshot auth rejected"));
 
         const { db, adapter } = createAdapterWithMocks({
@@ -942,17 +1076,33 @@ describe("main adapter — v0.2.0 command handlers", () => {
         const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
         if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
 
-        const camId    = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
-        const stateId  = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
+        // Flush the startup snapshot (fire-and-forget from onReady) so its result
+        // does not race with the first explicit trigger below.
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
         const onlineId = `${adapter.namespace}.cameras.${camId}.online`;
 
         // Success → online=true
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         let online = db.getState(onlineId) as ioBroker.State | undefined;
         expect(online?.val, "online must be true after a successful snapshot").to.equal(true);
 
         // Fail #1 — must NOT flip back to offline yet
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         online = db.getState(onlineId) as ioBroker.State | undefined;
         expect(
             online?.val,
@@ -960,12 +1110,24 @@ describe("main adapter — v0.2.0 command handlers", () => {
         ).to.equal(true);
 
         // Fail #2 — still online
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         online = db.getState(onlineId) as ioBroker.State | undefined;
         expect(online?.val, "online must stay true after 2 failures").to.equal(true);
 
         // Fail #3 — threshold reached, now offline
-        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
         online = db.getState(onlineId) as ioBroker.State | undefined;
         expect(
             online?.val,

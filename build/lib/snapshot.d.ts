@@ -1,12 +1,12 @@
 /**
- * Snapshot fetcher for Bosch cameras via Cloud-Proxy + HTTP Digest auth.
+ * Snapshot fetcher for Bosch cameras via LOCAL HTTP Digest auth.
  *
- * Cloud-Proxy URL format:
- *   LOCAL:  https://<lan-ip>:443/snap.jpg?JpegSize=1206
- *   REMOTE: https://proxy-XX.live.cbs.boschsecurity.com:PORT/HASH/snap.jpg?JpegSize=1206
+ * LOCAL URL format:
+ *   https://<lan-ip>:443/snap.jpg?JpegSize=1206
  *
  * LOCAL connections require HTTP Digest auth (cbs-USERNAME credentials).
- * REMOTE connections use plain GET — the URL hash IS the credential.
+ * Cloud-relay paths (proxy-NN.live.cbs.boschsecurity.com) are NEVER used
+ * for media — this adapter is LOCAL-only by design (v0.4.0).
  *
  * Reference: HA camera.py async_camera_image() lines ~615–680
  */
@@ -19,9 +19,6 @@
  */
 export declare class SnapshotError extends Error {
     readonly cause?: unknown;
-    /**
-     *
-     */
     constructor(message: string, cause?: unknown);
 }
 /**
@@ -40,23 +37,22 @@ export declare class SnapshotError extends Error {
  */
 export declare function buildSnapshotUrl(proxyUrl: string, jpegSize?: number): string;
 /**
- * Fetch a single JPEG snapshot from a Bosch camera via the Cloud-Proxy URL.
+ * Fetch a single JPEG snapshot from a Bosch camera via LOCAL HTTP Digest auth.
  *
- * LOCAL connections use HTTP Digest auth (two-step: 401 challenge → authenticated GET).
- * REMOTE connections use plain GET — no credentials needed; the URL hash is the auth token.
+ * Uses two-step Digest auth (RFC 7616: 401 challenge → authenticated GET).
+ * Mirrors HA camera.py async_camera_image() LOCAL branch.
  *
- * Mirrors HA camera.py async_camera_image() LOCAL+REMOTE branches.
+ * Cloud-relay paths are NEVER used — this adapter is LOCAL-only by design.
  *
- * @param proxyUrl        Full snap.jpg URL (built by caller via buildSnapshotUrl)
- * @param connectionType  "LOCAL" → Digest auth; "REMOTE" → plain GET
- * @param user            Digest username (cbs-<USERNAME> for LOCAL; ignored for REMOTE)
- * @param password        Digest password (for LOCAL; ignored for REMOTE)
+ * @param proxyUrl   Full snap.jpg URL (built by caller via buildSnapshotUrl)
+ * @param user       Digest username (cbs-<USERNAME>)
+ * @param password   Digest password
  * @param options
- * @param options.timeout Request timeout in ms (default 6000 — matches HA's 6 s cap)
- * @returns               JPEG image bytes as Buffer
+ * @param options.timeout  Request timeout in ms (default 6000 — matches HA's 6 s cap)
+ * @returns          JPEG image bytes as Buffer
  * @throws SnapshotError  On non-200 status / non-image content-type / empty body / network error
  */
-export declare function fetchSnapshot(proxyUrl: string, connectionType: "LOCAL" | "REMOTE", user: string, password: string, options?: {
+export declare function fetchSnapshot(proxyUrl: string, user: string, password: string, options?: {
     timeout?: number;
 }): Promise<Buffer>;
 //# sourceMappingURL=snapshot.d.ts.map

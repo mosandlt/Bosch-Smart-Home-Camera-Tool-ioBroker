@@ -1,6 +1,6 @@
 require:
-  - ts-node/register
+    - ts-node/register
 spec:
-  - "test/**/*.ts"
-  - "test/**/*.js"
+    - "test/**/*.ts"
+    - "test/**/*.js"
 timeout: 60000

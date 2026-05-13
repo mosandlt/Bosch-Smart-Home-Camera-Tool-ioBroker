@@ -1,13 +1,14 @@
 /**
  * Unit tests for src/lib/snapshot.ts
  *
- * Tests snapshot fetching via Cloud-Proxy URL with HTTP Digest auth (LOCAL)
- * and plain GET (REMOTE). Mirrors HA camera.py async_camera_image() behavior.
+ * Tests LOCAL snapshot fetching via HTTP Digest auth.
+ * Cloud-relay (REMOTE) paths have been removed in v0.4.0 — this adapter is
+ * LOCAL-only by design. REMOTE-path tests have been deleted accordingly.
  *
  * Framework: Mocha + Chai
  * Mocking:   axios.defaults.adapter (same pattern as digest.spec.ts)
  *
- * Reference: HA camera.py lines ~615-680 (LOCAL Digest + REMOTE plain GET)
+ * Reference: HA camera.py lines ~615-680 (LOCAL Digest branch)
  */
 
 import { expect } from "chai";
@@ -76,7 +77,6 @@ function resp401Digest(): FakeResponseShape {
 }
 
 const LOCAL_URL = "https://192.0.2.1:443/snap.jpg?JpegSize=1206";
-const REMOTE_URL = "https://proxy-12.live.cbs.boschsecurity.com:8443/HASH123/snap.jpg?JpegSize=1206";
 const JPEG_BYTES = Buffer.from("\xFF\xD8\xFF\xE0FAKEJPEG");
 
 // ── fetchSnapshot() ────────────────────────────────────────────────────────────
@@ -88,38 +88,23 @@ describe("fetchSnapshot()", () => {
         const adapter = makeAdapter([resp401Digest(), resp200Image(JPEG_BYTES)]);
 
         const result = await withAdapter(adapter, () =>
-            fetchSnapshot(LOCAL_URL, "LOCAL", "cbs-user", "secret"),
+            fetchSnapshot(LOCAL_URL, "cbs-user", "secret"),
         );
 
         expect(Buffer.isBuffer(result)).to.be.true;
         expect(result).to.deep.equal(JPEG_BYTES);
     });
 
-    // ── Test 2: REMOTE happy path ───────────────────────────────────────────────
-    it("(2) REMOTE happy path: plain axios GET returns 200 + image/jpeg → returns Buffer", async () => {
-        // REMOTE: single GET, no Digest challenge
-        const adapter = makeAdapter([resp200Image(JPEG_BYTES)]);
-
-        const result = await withAdapter(adapter, () =>
-            fetchSnapshot(REMOTE_URL, "REMOTE", "", ""),
-        );
-
-        expect(Buffer.isBuffer(result)).to.be.true;
-        expect(result).to.deep.equal(JPEG_BYTES);
-    });
-
-    // ── Test 3: 404 → SnapshotError ────────────────────────────────────────────
-    it("(3) 404 response → throws SnapshotError", async () => {
-        // REMOTE: non-200 status
+    // ── Test 2: 404 → SnapshotError ────────────────────────────────────────────
+    it("(2) LOCAL: 404 after Digest auth → throws SnapshotError", async () => {
         const adapter = makeAdapter([
-            { status: 404, headers: { "content-type": "text/html" }, data: Buffer.from("Not Found") },
+            resp401Digest(),
+            { status: 404, headers: {}, data: Buffer.from("") },
         ]);
 
         let threw = false;
         try {
-            await withAdapter(adapter, () =>
-                fetchSnapshot(REMOTE_URL, "REMOTE", "", ""),
-            );
+            await withAdapter(adapter, () => fetchSnapshot(LOCAL_URL, "cbs-user", "secret"));
         } catch (err: unknown) {
             threw = true;
             expect(err).to.be.instanceOf(SnapshotError);
@@ -128,17 +113,16 @@ describe("fetchSnapshot()", () => {
         expect(threw).to.be.true;
     });
 
-    // ── Test 4: 500 → SnapshotError ────────────────────────────────────────────
-    it("(4) 500 response → throws SnapshotError", async () => {
+    // ── Test 3: 500 → SnapshotError ────────────────────────────────────────────
+    it("(3) LOCAL: 500 response → throws SnapshotError", async () => {
         const adapter = makeAdapter([
+            resp401Digest(),
             { status: 500, headers: {}, data: Buffer.from("Internal Server Error") },
         ]);
 
         let threw = false;
         try {
-            await withAdapter(adapter, () =>
-                fetchSnapshot(REMOTE_URL, "REMOTE", "", ""),
-            );
+            await withAdapter(adapter, () => fetchSnapshot(LOCAL_URL, "cbs-user", "secret"));
         } catch (err: unknown) {
             threw = true;
             expect(err).to.be.instanceOf(SnapshotError);
@@ -147,9 +131,10 @@ describe("fetchSnapshot()", () => {
         expect(threw).to.be.true;
     });
 
-    // ── Test 5: 200 + text/html → SnapshotError ────────────────────────────────
-    it("(5) 200 with Content-Type text/html → throws SnapshotError (not image)", async () => {
+    // ── Test 4: 200 + text/html → SnapshotError ────────────────────────────────
+    it("(4) LOCAL: 200 with Content-Type text/html → throws SnapshotError (not image)", async () => {
         const adapter = makeAdapter([
+            resp401Digest(),
             {
                 status: 200,
                 headers: { "content-type": "text/html; charset=utf-8" },
@@ -159,9 +144,7 @@ describe("fetchSnapshot()", () => {
 
         let threw = false;
         try {
-            await withAdapter(adapter, () =>
-                fetchSnapshot(REMOTE_URL, "REMOTE", "", ""),
-            );
+            await withAdapter(adapter, () => fetchSnapshot(LOCAL_URL, "cbs-user", "secret"));
         } catch (err: unknown) {
             threw = true;
             expect(err).to.be.instanceOf(SnapshotError);
@@ -170,9 +153,10 @@ describe("fetchSnapshot()", () => {
         expect(threw).to.be.true;
     });
 
-    // ── Test 6: 200 + image but empty body → SnapshotError ─────────────────────
-    it("(6) 200 + image/jpeg but empty body → throws SnapshotError", async () => {
+    // ── Test 5: 200 + image but empty body → SnapshotError ─────────────────────
+    it("(5) LOCAL: 200 + image/jpeg but empty body → throws SnapshotError", async () => {
         const adapter = makeAdapter([
+            resp401Digest(),
             {
                 status: 200,
                 headers: { "content-type": "image/jpeg" },
@@ -182,9 +166,7 @@ describe("fetchSnapshot()", () => {
 
         let threw = false;
         try {
-            await withAdapter(adapter, () =>
-                fetchSnapshot(REMOTE_URL, "REMOTE", "", ""),
-            );
+            await withAdapter(adapter, () => fetchSnapshot(LOCAL_URL, "cbs-user", "secret"));
         } catch (err: unknown) {
             threw = true;
             expect(err).to.be.instanceOf(SnapshotError);
@@ -193,8 +175,8 @@ describe("fetchSnapshot()", () => {
         expect(threw).to.be.true;
     });
 
-    // ── Test 7: network timeout → SnapshotError ─────────────────────────────────
-    it("(7) network timeout → throws SnapshotError", async () => {
+    // ── Test 6: network timeout → SnapshotError ─────────────────────────────────
+    it("(6) network timeout → throws SnapshotError", async () => {
         const original = axios.defaults.adapter;
         const timeoutErr = Object.assign(new Error("timeout of 6000ms exceeded"), {
             code: "ECONNABORTED",
@@ -203,7 +185,7 @@ describe("fetchSnapshot()", () => {
 
         let threw = false;
         try {
-            await fetchSnapshot(REMOTE_URL, "REMOTE", "", "", { timeout: 6000 });
+            await fetchSnapshot(LOCAL_URL, "cbs-user", "secret", { timeout: 6000 });
         } catch (err: unknown) {
             threw = true;
             expect(err).to.be.instanceOf(SnapshotError);
@@ -213,63 +195,33 @@ describe("fetchSnapshot()", () => {
         }
         expect(threw).to.be.true;
     });
-
-    // ── Test 8: LOCAL 404 after Digest auth → SnapshotError ────────────────────
-    it("(8) LOCAL: 404 after Digest auth → throws SnapshotError", async () => {
-        const adapter = makeAdapter([
-            resp401Digest(),
-            { status: 404, headers: {}, data: Buffer.from("") },
-        ]);
-
-        let threw = false;
-        try {
-            await withAdapter(adapter, () =>
-                fetchSnapshot(LOCAL_URL, "LOCAL", "cbs-user", "secret"),
-            );
-        } catch (err: unknown) {
-            threw = true;
-            expect(err).to.be.instanceOf(SnapshotError);
-            expect((err as SnapshotError).message).to.match(/HTTP 404/);
-        }
-        expect(threw).to.be.true;
-    });
 });
 
 // ── buildSnapshotUrl() ─────────────────────────────────────────────────────────
 
 describe("buildSnapshotUrl()", () => {
-    // ── Test 8 (spec): bare proxy URL → appends /snap.jpg?JpegSize=1206 ─────────
-    it("(8) bare proxy URL → appends /snap.jpg?JpegSize=1206", () => {
+    it("(7) bare proxy URL → appends /snap.jpg?JpegSize=1206", () => {
         const url = buildSnapshotUrl("https://192.0.2.1:443");
         expect(url).to.equal("https://192.0.2.1:443/snap.jpg?JpegSize=1206");
     });
 
-    // ── Test 9 (spec): URL already ending /snap.jpg → just appends query ─────────
-    it("(9) URL already ending /snap.jpg → appends ?JpegSize=1206 (no duplicate path)", () => {
-        const url = buildSnapshotUrl("https://proxy-12.live.cbs.boschsecurity.com/HASH/snap.jpg");
-        expect(url).to.equal(
-            "https://proxy-12.live.cbs.boschsecurity.com/HASH/snap.jpg?JpegSize=1206",
-        );
+    it("(8) URL already ending /snap.jpg → appends ?JpegSize=1206 (no duplicate path)", () => {
+        const url = buildSnapshotUrl("https://192.0.2.1/snap.jpg");
+        expect(url).to.equal("https://192.0.2.1/snap.jpg?JpegSize=1206");
     });
 
-    // ── Test 10 (spec): custom JpegSize ──────────────────────────────────────────
-    it("(10) custom JpegSize=640 → uses that value", () => {
+    it("(9) custom JpegSize=640 → uses that value", () => {
         const url = buildSnapshotUrl("https://192.0.2.1:443", 640);
         expect(url).to.equal("https://192.0.2.1:443/snap.jpg?JpegSize=640");
     });
 
-    it("(11) trailing slash on base URL is stripped before appending path", () => {
+    it("(10) trailing slash on base URL is stripped before appending path", () => {
         const url = buildSnapshotUrl("https://192.0.2.1:443/");
         expect(url).to.equal("https://192.0.2.1:443/snap.jpg?JpegSize=1206");
     });
 
-    it("(12) remote proxy URL with path hash → appends /snap.jpg", () => {
-        const url = buildSnapshotUrl(
-            "https://proxy-12.live.cbs.boschsecurity.com:8443/HASH123",
-            320,
-        );
-        expect(url).to.equal(
-            "https://proxy-12.live.cbs.boschsecurity.com:8443/HASH123/snap.jpg?JpegSize=320",
-        );
+    it("(11) proxy URL with path — appends /snap.jpg", () => {
+        const url = buildSnapshotUrl("https://192.0.2.1:443/some/path", 320);
+        expect(url).to.equal("https://192.0.2.1:443/some/path/snap.jpg?JpegSize=320");
     });
 });

@@ -32,11 +32,7 @@ import {
     SCOPES,
 } from "../../src/lib/auth";
 
-import {
-    stubAxiosSequence,
-    stubAxiosError,
-    restoreAxios,
-} from "./helpers/axios-mock";
+import { stubAxiosSequence, stubAxiosError, restoreAxios } from "./helpers/axios-mock";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,19 +40,19 @@ import {
 
 /** Minimal valid TokenResult response body */
 const TOKEN_BODY = {
-    access_token:      "acc.token.here",
-    refresh_token:     "ref.token.here",
-    expires_in:        300,
+    access_token: "acc.token.here",
+    refresh_token: "ref.token.here",
+    expires_in: 300,
     refresh_expires_in: 86400,
-    token_type:        "Bearer",
-    scope:             "email offline_access profile openid",
+    token_type: "Bearer",
+    scope: "email offline_access profile openid",
 };
 
 /** Build a base64url-encoded JWT payload for detectTokenClientId tests */
 function makeJwt(payload: Record<string, unknown>): string {
-    const header  = Buffer.from('{"alg":"RS256","typ":"JWT"}').toString("base64url");
-    const body    = Buffer.from(JSON.stringify(payload)).toString("base64url");
-    const sig     = "fakesig";
+    const header = Buffer.from('{"alg":"RS256","typ":"JWT"}').toString("base64url");
+    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const sig = "fakesig";
     return `${header}.${body}.${sig}`;
 }
 
@@ -111,17 +107,19 @@ describe("generatePkcePair()", () => {
 
 describe("buildAuthUrl()", () => {
     const challenge = "testchallenge_abc123";
-    const state     = "random-state-xyz";
+    const state = "random-state-xyz";
     let url: string;
     let params: URLSearchParams;
 
     before(() => {
-        url    = buildAuthUrl(challenge, state);
+        url = buildAuthUrl(challenge, state);
         params = new URL(url).searchParams;
     });
 
     it("returns a URL starting with KEYCLOAK_BASE + /auth?", () => {
-        expect(url).to.match(new RegExp(`^${KEYCLOAK_BASE.replace(/\./g, "\\.").replace(/\//g, "\\/")}\/auth\\?`));
+        expect(url).to.match(
+            new RegExp(`^${KEYCLOAK_BASE.replace(/\./g, "\\.").replace(/\//g, "\\/")}\/auth\\?`),
+        );
     });
 
     it("contains client_id = CLIENT_ID", () => {
@@ -164,7 +162,9 @@ describe("extractCode()", () => {
     });
 
     it("returns null (no throw) when ?error= is present", () => {
-        const result = extractCode("https://www.bosch.com/boschcam?error=access_denied&error_description=user+cancelled");
+        const result = extractCode(
+            "https://www.bosch.com/boschcam?error=access_denied&error_description=user+cancelled",
+        );
         expect(result).to.be.null;
     });
 

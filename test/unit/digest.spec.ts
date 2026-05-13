@@ -132,7 +132,8 @@ const resp200 = (body = "ok"): FakeResponseShape => ({
 
 describe("parseDigestChallenge()", () => {
     it("parses a full qop=auth MD5 challenge", () => {
-        const hdr = 'Digest realm="TestRealm", nonce="ABCD1234", qop="auth", algorithm=MD5, opaque="OP42"';
+        const hdr =
+            'Digest realm="TestRealm", nonce="ABCD1234", qop="auth", algorithm=MD5, opaque="OP42"';
         const ch = parseDigestChallenge(hdr);
         expect(ch.realm).to.equal("TestRealm");
         expect(ch.nonce).to.equal("ABCD1234");
@@ -156,9 +157,9 @@ describe("parseDigestChallenge()", () => {
     });
 
     it("throws when nonce is missing", () => {
-        expect(() =>
-            parseDigestChallenge('Digest realm="X", qop="auth"'),
-        ).to.throw(/missing required 'nonce'/i);
+        expect(() => parseDigestChallenge('Digest realm="X", qop="auth"')).to.throw(
+            /missing required 'nonce'/i,
+        );
     });
 
     it("parses SHA-256 algorithm correctly", () => {
@@ -201,9 +202,7 @@ describe("buildDigestHeader()", () => {
         expect(cnonce).to.match(/^[0-9a-f]+$/);
         const ha1 = md5(`Mufasa:testrealm@host.com:Circle Of Life`);
         const ha2 = md5(`GET:/dir/index.html`);
-        const expected = md5(
-            `${ha1}:${challenge.nonce}:00000001:${cnonce}:auth:${ha2}`,
-        );
+        const expected = md5(`${ha1}:${challenge.nonce}:00000001:${cnonce}:auth:${ha2}`);
         expect(parts["response"]).to.equal(expected);
     });
 
@@ -293,10 +292,7 @@ describe("digestRequest()", () => {
         const wwwAuth =
             'Digest realm="Cam", nonce="nonce1", qop="auth", algorithm=MD5, opaque="op1"';
         const captures: CapturedCall[] = [];
-        const adapter = makeCaptureAdapter(
-            [resp401(wwwAuth), resp200("hello")],
-            captures,
-        );
+        const adapter = makeCaptureAdapter([resp401(wwwAuth), resp200("hello")], captures);
 
         const result = await withAdapter(adapter, () =>
             digestRequest("http://cam.local/api", "user", "secret"),
@@ -322,9 +318,7 @@ describe("digestRequest()", () => {
         const captures: CapturedCall[] = [];
         const adapter = makeCaptureAdapter([resp200("direct")], captures);
 
-        const result = await withAdapter(adapter, () =>
-            digestRequest("http://h/", "u", "p"),
-        );
+        const result = await withAdapter(adapter, () => digestRequest("http://h/", "u", "p"));
 
         expect(result.status).to.equal(200);
         expect(result.data.toString()).to.equal("direct");
@@ -334,10 +328,7 @@ describe("digestRequest()", () => {
     it("(3) no qop (legacy mode): response hash uses ha1:nonce:ha2 only", async () => {
         const wwwAuth = 'Digest realm="LegacyRealm", nonce="leg123", algorithm=MD5';
         const captures: CapturedCall[] = [];
-        const adapter = makeCaptureAdapter(
-            [resp401(wwwAuth), resp200("ok")],
-            captures,
-        );
+        const adapter = makeCaptureAdapter([resp401(wwwAuth), resp200("ok")], captures);
 
         await withAdapter(adapter, () => digestRequest("http://h/path", "u", "p"));
 
@@ -355,13 +346,9 @@ describe("digestRequest()", () => {
     });
 
     it("(4) algorithm=MD5-SESS: HA1 is re-hashed with nonce+cnonce", async () => {
-        const wwwAuth =
-            'Digest realm="R", nonce="sessNonce", qop="auth", algorithm=MD5-SESS';
+        const wwwAuth = 'Digest realm="R", nonce="sessNonce", qop="auth", algorithm=MD5-SESS';
         const captures: CapturedCall[] = [];
-        const adapter = makeCaptureAdapter(
-            [resp401(wwwAuth), resp200()],
-            captures,
-        );
+        const adapter = makeCaptureAdapter([resp401(wwwAuth), resp200()], captures);
 
         await withAdapter(adapter, () => digestRequest("http://h/p", "user", "pass"));
 
@@ -378,17 +365,11 @@ describe("digestRequest()", () => {
     });
 
     it("(5) algorithm=SHA-256: uses SHA-256 hash function throughout", async () => {
-        const wwwAuth =
-            'Digest realm="R256", nonce="sha256nonce", qop="auth", algorithm=SHA-256';
+        const wwwAuth = 'Digest realm="R256", nonce="sha256nonce", qop="auth", algorithm=SHA-256';
         const captures: CapturedCall[] = [];
-        const adapter = makeCaptureAdapter(
-            [resp401(wwwAuth), resp200()],
-            captures,
-        );
+        const adapter = makeCaptureAdapter([resp401(wwwAuth), resp200()], captures);
 
-        await withAdapter(adapter, () =>
-            digestRequest("http://h/res", "alice", "wonderland"),
-        );
+        await withAdapter(adapter, () => digestRequest("http://h/res", "alice", "wonderland"));
 
         const authHeader = captures[1].config.headers?.["Authorization"] as string;
         const parts = parseAuthHeader(authHeader);
@@ -415,7 +396,11 @@ describe("digestRequest()", () => {
 
     it("(7) 401 with Basic scheme throws Error (non-Digest scheme)", async () => {
         const adapter = makeAdapter([
-            { status: 401, headers: { "www-authenticate": 'Basic realm="X"' }, data: Buffer.from("") },
+            {
+                status: 401,
+                headers: { "www-authenticate": 'Basic realm="X"' },
+                data: Buffer.from(""),
+            },
         ]);
         let threw = false;
         try {
@@ -453,9 +438,7 @@ describe("digestRequest()", () => {
             captures,
         );
 
-        const result = await withAdapter(adapter, () =>
-            digestRequest("http://h/", "u", "wrong"),
-        );
+        const result = await withAdapter(adapter, () => digestRequest("http://h/", "u", "wrong"));
 
         // digestRequest returns the 2nd response — caller decides what to do
         expect(result.status).to.equal(401);
@@ -466,10 +449,7 @@ describe("digestRequest()", () => {
         const wwwAuth = 'Digest realm="R", nonce="n", qop="auth", algorithm=MD5';
         const postBody = Buffer.from("request-body");
         const captures: CapturedCall[] = [];
-        const adapter = makeCaptureAdapter(
-            [resp401(wwwAuth), resp200("created")],
-            captures,
-        );
+        const adapter = makeCaptureAdapter([resp401(wwwAuth), resp200("created")], captures);
 
         const result = await withAdapter(adapter, () =>
             digestRequest("http://h/resource", "u", "p", { method: "POST", data: postBody }),
@@ -485,8 +465,7 @@ describe("digestRequest()", () => {
     it("(11) network error: axios rejection propagates to caller", async () => {
         const networkErr = Object.assign(new Error("ECONNREFUSED"), { code: "ECONNREFUSED" });
         const original = axios.defaults.adapter;
-        axios.defaults.adapter = (() =>
-            Promise.reject(networkErr)) as unknown as AxiosAdapter;
+        axios.defaults.adapter = (() => Promise.reject(networkErr)) as unknown as AxiosAdapter;
         let threw = false;
         try {
             await digestRequest("http://h/", "u", "p");
@@ -509,9 +488,7 @@ describe("digestGet() / digestPut()", () => {
         const captures: CapturedCall[] = [];
         const adapter = makeCaptureAdapter([resp200("body")], captures);
 
-        const result = await withAdapter(adapter, () =>
-            digestGet("http://h/", "u", "p"),
-        );
+        const result = await withAdapter(adapter, () => digestGet("http://h/", "u", "p"));
 
         expect(result.status).to.equal(200);
         expect((captures[0].config.method as string).toUpperCase()).to.equal("GET");

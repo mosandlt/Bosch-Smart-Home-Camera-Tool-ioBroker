@@ -37,6 +37,8 @@ import { fetchCameras, type BoschCamera, UnauthorizedError } from "./lib/cameras
 
 import { openLiveSession, closeLiveSession, type LiveSession } from "./lib/live_session";
 
+import { SessionWatchdog } from "./lib/session_watchdog";
+
 // Note: rcp.ts (RCP+ commands) is no longer imported — all camera commands
 // (privacy, light, image rotation) now use the Bosch Cloud API exclusively.
 
@@ -84,6 +86,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
     /** FCM push listener (null until onReady wires it up). */
     private _fcmListener: FcmListener | null = null;
+
+    /** RTSP session watchdogs keyed by camera ID. Renew LOCAL sessions before expiry. */
+    private _sessionWatchdogs: Map<string, SessionWatchdog> = new Map();
 
     /**
      * Client-side image rotation flag per camera ID.
@@ -381,7 +386,37 @@ class BoschSmartHomeCamera extends utils.Adapter {
             await this.setObjectNotExistsAsync(`${prefix}.light_enabled`, {
                 type: "state",
                 common: {
-                    name: "Camera light",
+                    name: "Camera light (legacy — toggles both front_light + wallwasher)",
+                    role: "switch.light",
+                    type: "boolean",
+                    read: true,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            // v0.4.0: separate front light + wallwasher datapoints so external
+            // sensors (dusk script, motion → wallwasher-only, etc.) can drive
+            // each light source individually. Mirrors Bosch's own /lighting_override
+            // (Gen1) and /lighting/switch/{front,topdown} (Gen2) split.
+            await this.setObjectNotExistsAsync(`${prefix}.front_light_enabled`, {
+                type: "state",
+                common: {
+                    name: "Front spotlight (Gen1 frontLight / Gen2 front)",
+                    role: "switch.light",
+                    type: "boolean",
+                    read: true,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.wallwasher_enabled`, {
+                type: "state",
+                common: {
+                    name: "Wallwasher / top-down LED strip (Gen1 wallwasher / Gen2 topdown)",
                     role: "switch.light",
                     type: "boolean",
                     read: true,
@@ -414,6 +449,41 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     read: false,
                     write: true,
                     def: false,
+                },
+                native: {},
+            });
+
+            // v0.4.0: synthetic motion trigger — lets external sensors (Hue, etc.)
+            // inject a motion event so automations listening for Bosch motion fire
+            // without waiting for the real Bosch FCM push.
+            // Forum reference: ioBroker forum #84538 (Jaschkopf).
+            await this.setObjectNotExistsAsync(`${prefix}.motion_trigger`, {
+                type: "state",
+                common: {
+                    name: "Inject synthetic motion event (write true to trigger)",
+                    role: "button",
+                    type: "boolean",
+                    read: false,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
+
+            await this.setObjectNotExistsAsync(`${prefix}.motion_trigger_event_type`, {
+                type: "state",
+                common: {
+                    name: "Event type for synthetic motion trigger",
+                    role: "text",
+                    type: "string",
+                    read: true,
+                    write: true,
+                    def: "motion",
+                    states: {
+                        motion: "motion",
+                        person: "person",
+                        audio_alarm: "audio_alarm",
+                    },
                 },
                 native: {},
             });
@@ -583,15 +653,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
     // ── Live session management ─────────────────────────────────────────────
 
     /**
-     * Ensure a fresh live session exists for the given camera ID.
+     * Ensure a fresh live session exists for the given camera ID (LOCAL only).
      *
-     * Caches sessions and reuses them while they are within 75% of their
-     * bufferingTime. Opens a new session (and spawns a TLS proxy) when stale.
+     * Caches sessions and reuses them while they are within 30 s of being opened.
+     * On a fresh session, spawns a TLS proxy and arms the RTSP session watchdog
+     * so the stream renews automatically before the Bosch LOCAL session expires.
      *
-     * Note: bufferingTimeMs from Bosch is typically 500 ms (LOCAL) or 1000 ms
-     * (REMOTE). We treat it as minimum keepalive time and open a fresh session
-     * on every command if the cached one is more than 30 seconds old — a
-     * conservative threshold that avoids session-expired errors in practice.
+     * This adapter is LOCAL-only by design: cloud-relay paths are never used
+     * for media. If the camera is unreachable on the LAN, the call throws.
      *
      * @param camId
      */
@@ -607,45 +676,70 @@ class BoschSmartHomeCamera extends utils.Adapter {
             throw new Error(`Cannot open live session for ${camId} — no access token`);
         }
 
-        // Open a fresh session (AUTO mode: LOCAL first, falls back to REMOTE on network error)
-        const session = await openLiveSession(
-            this._httpClient,
-            this._currentAccessToken,
-            camId,
-            "AUTO",
-        );
+        // Open a fresh LOCAL session — throws if camera unreachable on LAN
+        const session = await openLiveSession(this._httpClient, this._currentAccessToken, camId);
         this._liveSessions.set(camId, session);
 
-        // Spawn (or replace) the TLS proxy for the stream URL
+        // Spawn (or replace) TLS proxy + update stream_url + arm watchdog
+        await this.upsertSession(camId, session);
+
+        // Arm session watchdog if not already running
+        if (!this._sessionWatchdogs.has(camId)) {
+            const watchdog = new SessionWatchdog({
+                openSession: () => {
+                    if (!this._currentAccessToken) {
+                        return Promise.reject(
+                            new Error(`Cannot renew session for ${camId} — no access token`),
+                        );
+                    }
+                    return openLiveSession(this._httpClient, this._currentAccessToken, camId);
+                },
+                onRenew: async (newSession: LiveSession) => {
+                    this._liveSessions.set(camId, newSession);
+                    await this.upsertSession(camId, newSession);
+                },
+                onError: (err: Error) => {
+                    this.log.warn(
+                        `RTSP watchdog: LOCAL renewal failed for camera ${camId.slice(0, 8)} — ` +
+                            `stream will stop: ${err.message}`,
+                    );
+                    // Stop the TLS proxy and clear the stream_url
+                    const proxy = this._tlsProxies.get(camId);
+                    if (proxy) {
+                        void proxy.stop().catch(() => undefined);
+                        this._tlsProxies.delete(camId);
+                    }
+                    void this.upsertState(`cameras.${camId}.stream_url`, "");
+                    this._sessionWatchdogs.delete(camId);
+                },
+                log: (level, msg) => this.log[level](msg),
+            });
+            watchdog.start(session);
+            this._sessionWatchdogs.set(camId, watchdog);
+        }
+
+        return session;
+    }
+
+    /**
+     * Spawn (or replace) the TLS proxy for the given session and update stream_url.
+     * Extracted so both ensureLiveSession and the watchdog onRenew callback can reuse it.
+     *
+     * @param camId    Camera UUID
+     * @param session  Freshly opened LiveSession (always LOCAL)
+     */
+    private async upsertSession(camId: string, session: LiveSession): Promise<void> {
         try {
             const existingProxy = this._tlsProxies.get(camId);
             if (existingProxy) {
-                // Stop old proxy silently before starting a new one
                 await existingProxy.stop().catch(() => undefined);
                 this._tlsProxies.delete(camId);
             }
 
-            // Derive remote host + port from the session
-            let remoteHost: string;
-            let remotePort: number;
-
-            if (session.connectionType === "LOCAL" && session.lanAddress) {
-                // lanAddress: "192.168.x.x:443"
-                const [h, pStr] = session.lanAddress.split(":");
-                remoteHost = h;
-                remotePort = parseInt(pStr ?? "443", 10);
-            } else {
-                // REMOTE: proxyUrl = "https://proxy-NN:42090/{hash}/snap.jpg?..."
-                // Extract host and port from URL
-                try {
-                    const u = new URL(session.proxyUrl);
-                    remoteHost = u.hostname;
-                    remotePort = u.port ? parseInt(u.port, 10) : 443;
-                } catch {
-                    remoteHost = "residential.cbs.boschsecurity.com";
-                    remotePort = 42090;
-                }
-            }
+            // lanAddress: "192.168.x.x:443" — always LOCAL
+            const [h, pStr] = session.lanAddress.split(":");
+            const remoteHost = h;
+            const remotePort = parseInt(pStr ?? "443", 10);
 
             const proxyHandle = await startTlsProxy({
                 remoteHost,
@@ -655,7 +749,6 @@ class BoschSmartHomeCamera extends utils.Adapter {
             });
             this._tlsProxies.set(camId, proxyHandle);
 
-            // Write stream URL to state
             await this.setObjectNotExistsAsync(`cameras.${camId}.stream_url`, {
                 type: "state",
                 common: {
@@ -678,8 +771,6 @@ class BoschSmartHomeCamera extends utils.Adapter {
             const msg = proxyErr instanceof Error ? proxyErr.message : String(proxyErr);
             this.log.warn(`Could not start TLS proxy for ${camId}: ${msg}`);
         }
-
-        return session;
     }
 
     // ── PKCE browser-login helpers ──────────────────────────────────────────
@@ -1080,6 +1171,24 @@ class BoschSmartHomeCamera extends utils.Adapter {
                         );
                     });
                     break;
+                case "front_light_enabled":
+                    await this.handleFrontLightToggle(camId, Boolean(state.val));
+                    void this.handleSnapshotTrigger(camId).catch((err: unknown) => {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        this.log.debug(
+                            `Auto-snapshot after front_light toggle failed for ${camId}: ${msg}`,
+                        );
+                    });
+                    break;
+                case "wallwasher_enabled":
+                    await this.handleWallwasherToggle(camId, Boolean(state.val));
+                    void this.handleSnapshotTrigger(camId).catch((err: unknown) => {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        this.log.debug(
+                            `Auto-snapshot after wallwasher toggle failed for ${camId}: ${msg}`,
+                        );
+                    });
+                    break;
                 case "image_rotation_180":
                     await this.handleImageRotationToggle(camId, Boolean(state.val));
                     break;
@@ -1087,6 +1196,20 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     if (state.val) {
                         await this.handleSnapshotTrigger(camId);
                         // Reset trigger button to false (no longer "pending")
+                        await this.setStateAsync(id, false, true);
+                    }
+                    return; // skip generic ack below
+                case "motion_trigger":
+                    if (state.val) {
+                        // Read the sibling event-type state (default "motion")
+                        const etState = await this.getStateAsync(
+                            `cameras.${camId}.motion_trigger_event_type`,
+                        );
+                        const validTypes = new Set(["motion", "person", "audio_alarm"]);
+                        const rawEt = typeof etState?.val === "string" ? etState.val : "motion";
+                        const eventType = validTypes.has(rawEt) ? rawEt : "motion";
+                        await this.triggerSyntheticMotion(camId, eventType);
+                        // Reset trigger button to false
                         await this.setStateAsync(id, false, true);
                     }
                     return; // skip generic ack below
@@ -1117,6 +1240,26 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this.log.info(
             `FCM event [${ev.eventType}] for camera ${ev.cameraId.slice(0, 8)} at ${ev.timestamp}`,
         );
+    }
+
+    /**
+     * Inject a synthetic motion event for a camera.
+     *
+     * Writes last_motion_at + last_motion_event_type states exactly as FCM events do,
+     * so downstream automations that listen for Bosch motion states fire immediately
+     * without waiting for the real Bosch FCM push.
+     *
+     * Forum reference: ioBroker forum #84538 (Jaschkopf — Philips Hue in driveway).
+     *
+     * @param camId      Camera UUID
+     * @param eventType  "motion" | "person" | "audio_alarm"
+     */
+    private async triggerSyntheticMotion(camId: string, eventType: string): Promise<void> {
+        const ts = new Date().toISOString();
+        const prefix = `cameras.${camId}`;
+        await this.setStateAsync(`${prefix}.last_motion_at`, ts, true);
+        await this.setStateAsync(`${prefix}.last_motion_event_type`, eventType, true);
+        this.log.info(`Synthetic ${eventType} trigger for camera ${camId.slice(0, 8)}`);
     }
 
     /**
@@ -1245,6 +1388,70 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * @param enabled
      */
     private async handleLightToggle(camId: string, enabled: boolean): Promise<void> {
+        // Legacy combined switch — moves both lights together.
+        await this._applyLightingState(camId, {
+            frontLight: enabled,
+            wallwasher: enabled,
+        });
+    }
+
+    /**
+     * v0.4.0: toggle the front spotlight only, keep wallwasher untouched.
+     * Requested by ioBroker forum #84538 for dusk-sensor-driven group switching.
+     *
+     * @param camId
+     * @param enabled
+     */
+    private async handleFrontLightToggle(camId: string, enabled: boolean): Promise<void> {
+        const currentWallwasher = await this._readBoolState(`cameras.${camId}.wallwasher_enabled`);
+        await this._applyLightingState(camId, {
+            frontLight: enabled,
+            wallwasher: currentWallwasher,
+        });
+    }
+
+    /**
+     * v0.4.0: toggle the wallwasher (Gen1) / top-down LED strip (Gen2) only,
+     * keep front spotlight untouched.
+     *
+     * @param camId
+     * @param enabled
+     */
+    private async handleWallwasherToggle(camId: string, enabled: boolean): Promise<void> {
+        const currentFront = await this._readBoolState(`cameras.${camId}.front_light_enabled`);
+        await this._applyLightingState(camId, {
+            frontLight: currentFront,
+            wallwasher: enabled,
+        });
+    }
+
+    /** Read a boolean state with default false (treats null/undefined/non-bool as false). */
+    private async _readBoolState(id: string): Promise<boolean> {
+        const s = await this.getStateAsync(id);
+        return s?.val === true;
+    }
+
+    /**
+     * Single source of truth for the lighting REST calls. All three public
+     * handlers (legacy combined, front-only, wallwasher-only) funnel through
+     * here so we only have one place that knows the Bosch endpoints.
+     *
+     * Endpoint matrix:
+     *   Gen1: PUT /v11/video_inputs/{id}/lighting_override
+     *         body: { frontLightOn, wallwasherOn, frontLightIntensity? }
+     *   Gen2: PUT /v11/video_inputs/{id}/lighting/switch/front   { enabled }
+     *         PUT /v11/video_inputs/{id}/lighting/switch/topdown { enabled }
+     *
+     * After a successful call the per-light state objects are ack'd so that
+     * `light_enabled` (legacy combined) and the two new datapoints stay in sync.
+     *
+     * @param camId
+     * @param state
+     */
+    private async _applyLightingState(
+        camId: string,
+        state: { frontLight: boolean; wallwasher: boolean },
+    ): Promise<void> {
         if (!this._currentAccessToken) {
             throw new Error(`Cannot set light for ${camId} — no access token`);
         }
@@ -1258,16 +1465,17 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
         if (isGen2) {
             const base = `https://residential.cbs.boschsecurity.com/v11/video_inputs/${camId}/lighting/switch`;
-            const body = { enabled };
             const [r1, r2] = await Promise.all([
-                this._httpClient.put(`${base}/front`, body, {
-                    headers,
-                    validateStatus: () => true,
-                }),
-                this._httpClient.put(`${base}/topdown`, body, {
-                    headers,
-                    validateStatus: () => true,
-                }),
+                this._httpClient.put(
+                    `${base}/front`,
+                    { enabled: state.frontLight },
+                    { headers, validateStatus: () => true },
+                ),
+                this._httpClient.put(
+                    `${base}/topdown`,
+                    { enabled: state.wallwasher },
+                    { headers, validateStatus: () => true },
+                ),
             ]);
             const ok1 = [200, 201, 204].includes(r1.status);
             const ok2 = [200, 201, 204].includes(r2.status);
@@ -1278,9 +1486,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
             }
         } else {
             const url = `https://residential.cbs.boschsecurity.com/v11/video_inputs/${camId}/lighting_override`;
-            const body = enabled
-                ? { frontLightOn: true, wallwasherOn: true, frontLightIntensity: 1.0 }
-                : { frontLightOn: false, wallwasherOn: false };
+            const body = {
+                frontLightOn: state.frontLight,
+                wallwasherOn: state.wallwasher,
+                ...(state.frontLight ? { frontLightIntensity: 1.0 } : {}),
+            };
             const resp = await this._httpClient.put(url, body, {
                 headers,
                 validateStatus: () => true,
@@ -1289,8 +1499,20 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 throw new Error(`Cloud light PUT Gen1 returned HTTP ${resp.status}`);
             }
         }
+
+        // Keep all three light states in sync (front_light + wallwasher + legacy combined)
+        await this.setStateAsync(`cameras.${camId}.front_light_enabled`, state.frontLight, true);
+        await this.setStateAsync(`cameras.${camId}.wallwasher_enabled`, state.wallwasher, true);
+        await this.setStateAsync(
+            `cameras.${camId}.light_enabled`,
+            state.frontLight && state.wallwasher,
+            true,
+        );
+
         this.log.info(
-            `Camera light ${enabled ? "ON" : "OFF"} set for camera ${camId.slice(0, 8)} (gen${isGen2 ? 2 : 1})`,
+            `Camera light front=${state.frontLight ? "ON" : "OFF"} wallwasher=${
+                state.wallwasher ? "ON" : "OFF"
+            } for ${camId.slice(0, 8)} (gen${isGen2 ? 2 : 1})`,
         );
     }
 
@@ -1337,12 +1559,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
         let buf: Buffer;
         try {
-            buf = await fetchSnapshot(
-                snapUrl,
-                session.connectionType,
-                session.digestUser,
-                session.digestPassword,
-            );
+            buf = await fetchSnapshot(snapUrl, session.digestUser, session.digestPassword);
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             // Only retry on "aborted" / connection-reset errors — not on auth (401)
@@ -1356,12 +1573,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
             this.log.debug(`Snapshot retry for ${camId.slice(0, 8)}: ${msg}`);
             await new Promise((r) => setTimeout(r, 800));
             try {
-                buf = await fetchSnapshot(
-                    snapUrl,
-                    session.connectionType,
-                    session.digestUser,
-                    session.digestPassword,
-                );
+                buf = await fetchSnapshot(snapUrl, session.digestUser, session.digestPassword);
             } catch (retryErr) {
                 await this.markCameraReachability(camId, false);
                 throw retryErr;
@@ -1463,6 +1675,13 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     }
                     this._fcmListener = null;
                 }
+
+                // Stop all session watchdogs BEFORE stopping TLS proxies
+                // (prevents watchdog renewal racing with cleanup)
+                for (const [, watchdog] of this._sessionWatchdogs) {
+                    watchdog.stop();
+                }
+                this._sessionWatchdogs.clear();
 
                 // Stop all TLS proxies
                 for (const [, handle] of this._tlsProxies) {

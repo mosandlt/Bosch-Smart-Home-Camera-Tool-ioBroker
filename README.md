@@ -4,24 +4,38 @@ ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360°, Gen2 
 
 See the [Home Assistant integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) for the mature reference implementation (v12.0.1, HA Quality Scale Platinum).
 
+## Changelog
+
+### v0.4.0
+- Light-datapoint split: `front_light_enabled` + `wallwasher_enabled` can now be controlled independently (e.g. a dusk sensor drives the wallwasher only, without touching the front spotlight)
+- Synthetic motion trigger: write `true` to `cameras.<id>.motion_trigger` (select event type via `motion_trigger_event_type`) to inject a motion/person/audio_alarm event from an external sensor (e.g. Philips Hue in the driveway) so automations fire immediately without waiting for the Bosch FCM push
+- RTSP session watchdog: LOCAL Bosch sessions renew automatically ~60 s before `maxSessionDuration` expires — BlueIris and similar 24/7 recorders no longer see an hourly stream drop
+- Cloud-relay media paths fully removed: adapter enforces LOCAL-only for all media (RTSP + snapshots); if the camera is unreachable on the LAN a clear error is logged — no silent fallback to `proxy-NN.live.cbs.boschsecurity.com:42090`
+
+### v0.3.3
+FCM resilience + token refresh on startup. Single Bosch OSS Firebase API key, per-mode failure surfacing, auto-snapshot at start, polling fallback.
+
 ## Status
 
-**Alpha (v0.3.3)** — verified live against 4 cameras (Gen1 + Gen2, FW 7.91.56 / 9.40.25) on a real ioBroker instance.
+**Alpha (v0.4.0)** — verified live against 4 cameras (Gen1 + Gen2, FW 7.91.56 / 9.40.25) on a real ioBroker instance.
 
 What works:
 - Browser-based OAuth2 PKCE login via Bosch SingleKey ID (no programmatic password handling — captcha/MFA happen in the browser)
 - Token auto-refresh (~45 min cadence; 4xx → re-login required, 5xx → silent retry). Stored `refresh_token` also used at startup to mint a fresh `access_token` silently — no PKCE re-login required after restart, even if the adapter was stopped longer than the 1 h access-token lifetime.
 - Camera discovery (Gen1 + Gen2, `GET /v11/video_inputs`)
-- Per-camera state tree: `name`, `firmware_version`, `hardware_version`, `generation`, `online`, `privacy_enabled`, `light_enabled`, `image_rotation_180`, `snapshot_trigger`, `snapshot_path`, `stream_url`, `last_motion_at`, `last_motion_event_type`
+- Per-camera state tree: `name`, `firmware_version`, `hardware_version`, `generation`, `online`, `privacy_enabled`, `light_enabled`, `front_light_enabled`, `wallwasher_enabled`, `image_rotation_180`, `snapshot_trigger`, `motion_trigger`, `motion_trigger_event_type`, `snapshot_path`, `stream_url`, `last_motion_at`, `last_motion_event_type`
 - Privacy toggle via Bosch Cloud API `PUT /v11/video_inputs/{id}/privacy`
-- Light toggle, Gen-specific:
+- Light toggle, Gen-specific and now split into independent datapoints:
   - Gen2: `PUT /lighting/switch/front` + `/topdown`
   - Gen1: `PUT /lighting_override` (frontLightOn + wallwasherOn)
+  - `front_light_enabled` and `wallwasher_enabled` can be toggled independently; `light_enabled` remains as a legacy combined switch
+- Synthetic motion trigger (`motion_trigger` write-only button + `motion_trigger_event_type` selector) for external sensor integration without waiting for Bosch FCM push
 - Snapshot trigger writes JPEG into the adapter file-store (`/<namespace>/cameras/<id>/snapshot.jpg`), with automatic retry on the first "stream has been aborted" hiccup that Bosch Gen2 firmware emits after idle. One startup snapshot per camera flips `cameras.<id>.online` from the default `false` to the real state immediately.
-- Per-camera TLS proxy: `stream_url = rtsp://127.0.0.1:<port>/rtsp_tunnel` for use in `iobroker.cameras` or go2rtc
+- Per-camera TLS proxy: `stream_url = rtsp://127.0.0.1:<port>/rtsp_tunnel` for use in `iobroker.cameras` or go2rtc. LOCAL-only by design — no cloud relay.
+- RTSP session watchdog: LOCAL sessions renew automatically ~60 s before `maxSessionDuration` expires — 24/7 recording works without hourly stream drops
 - FCM push listener (`@aracna/fcm@1.0.32` MTalk/MCS) for sub-second motion / audio-alarm / person events. `info.fcm_active` reflects state: `healthy` / `polling` / `error` / `disconnected` / `stopped`. When push registration fails the adapter falls back to `/v11/events` polling every 30 s (`info.fcm_active=polling`) — events still arrive, just with higher latency.
 - Encrypted credential storage (`encryptedNative` — js-controller encrypts the refresh token at rest)
-- 310 unit tests passing
+- ~320 unit tests passing
 
 ## Setup
 
@@ -67,8 +81,8 @@ snapshot refresh in the example dashboard or bridge via go2rtc → WebRTC/HLS.
 
 | Version | Scope |
 | --- | --- |
-| v0.4.0 | Motion zones + privacy masks (read/write via `/v11/video_inputs/{id}/motion`) |
-| v0.5.0 | Mini-NVR: pre-roll ring buffer + local segment recording |
+| v0.5.0 | Motion zones + privacy masks (read/write via `/v11/video_inputs/{id}/motion`) |
+| v0.6.0 | Mini-NVR: pre-roll ring buffer + local segment recording |
 | v1.0.0 | VIS widget + feature parity with the HA integration |
 
 Image rotation (v0.3.0) is a client-side display flag — Bosch's Cloud API has no rotation endpoint and RCP+ `0x0810` WRITE returns HTTP 401 on Gen2 FW 9.40.25, mirroring the HA integration's approach.

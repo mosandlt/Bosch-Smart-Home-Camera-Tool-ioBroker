@@ -26,7 +26,9 @@ export interface BoschCameraAdapterConfig {
  * let adapter: ReturnType<typeof createAdapterMock>;
  * beforeEach(() => { adapter = createAdapterMock(); });
  */
-export function createAdapterMock(configOverrides: Partial<BoschCameraAdapterConfig> = {}): ReturnType<typeof utils.unit.createMocks>["adapter"] {
+export function createAdapterMock(
+    configOverrides: Partial<BoschCameraAdapterConfig> = {},
+): ReturnType<typeof utils.unit.createMocks>["adapter"] {
     const config: BoschCameraAdapterConfig = {
         username: "test@example.com",
         password: "secret",

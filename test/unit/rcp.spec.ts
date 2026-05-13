@@ -51,11 +51,7 @@ import {
     CMD_SNAPSHOT,
 } from "../../src/lib/rcp";
 
-import {
-    stubAxiosSequence,
-    stubAxiosError,
-    restoreAxios,
-} from "./helpers/axios-mock";
+import { stubAxiosSequence, stubAxiosError, restoreAxios } from "./helpers/axios-mock";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -195,7 +191,8 @@ describe("parseRcpResponse()", () => {
 
     it("throws RcpError for <err> response", () => {
         const raw = makeErrXml("0x0c0d");
-        expect(() => parseRcpResponse(raw, "0x0808")).to.throw(RcpError)
+        expect(() => parseRcpResponse(raw, "0x0808"))
+            .to.throw(RcpError)
             .that.satisfies((e: RcpError) => e.code === "0x0c0d" && e.command === "0x0808");
     });
 
@@ -208,8 +205,7 @@ describe("parseRcpResponse()", () => {
     });
 
     it("throws on empty buffer", () => {
-        expect(() => parseRcpResponse(Buffer.alloc(0), "0x099e"))
-            .to.throw(/empty response/);
+        expect(() => parseRcpResponse(Buffer.alloc(0), "0x099e")).to.throw(/empty response/);
     });
 
     it("returns empty payload for XML with no payload/str/err tags", () => {

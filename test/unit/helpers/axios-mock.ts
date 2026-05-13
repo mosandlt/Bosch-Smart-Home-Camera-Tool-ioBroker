@@ -5,7 +5,11 @@
  * so stubs intercept both `axios(config)` and `axios.request(config)` call forms.
  */
 
-import axios, { type AxiosResponse, type AxiosAdapter, type InternalAxiosRequestConfig } from "axios";
+import axios, {
+    type AxiosResponse,
+    type AxiosAdapter,
+    type InternalAxiosRequestConfig,
+} from "axios";
 
 let _savedAdapter: AxiosAdapter | string | readonly (string | AxiosAdapter)[] | undefined;
 
@@ -20,7 +24,9 @@ export function stubAxiosSequence(responses: Array<Partial<AxiosResponse>>): voi
     axios.defaults.adapter = (config: InternalAxiosRequestConfig): Promise<AxiosResponse> => {
         const resp = responses[callIndex++];
         if (!resp) {
-            return Promise.reject(new Error(`stubAxiosSequence: no response configured for call #${callIndex}`));
+            return Promise.reject(
+                new Error(`stubAxiosSequence: no response configured for call #${callIndex}`),
+            );
         }
         return Promise.resolve({
             status: 200,
