@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-13
+### Added
+- FCM push listener (real implementation): `@aracna/fcm@1.0.32` MTalk/MCS protocol replaces v0.2.0 stub
+- `FcmListener.start()` wired in `onReady` with full event handling: `push`, `registered`, `error`, `disconnect`
+- `fetchAndProcessEvents()`: on each FCM wake-up, fetches `/v11/events?videoInputId=<cam>&limit=5` for all cameras, deduplicates by event ID, updates `cameras.<id>.last_motion_at` + `last_motion_event_type`
+- Gen2 PERSON upgrade logic in event normalisation: `eventType=MOVEMENT + eventTags=["PERSON"]` → `"person"` (mirrors HA fcm.py)
+- `info.fcm_active` updated to `"healthy"` on register, `"error"` on start failure, `"disconnected"` on MTalk socket close
+- `_lastSeenEventId` per-camera dedup map prevents duplicate state writes on concurrent FCM pushes
+- 14 new tests (299 total, was 285 at v0.2.0)
+
+### Fixed
+- Image rotation: removed dead RCP+ 0x0810 WRITE that returned HTTP 401 on Gen2 FW 9.40.25. Now stores flag in `_imageRotation` in-memory map and acks state immediately. Bosch Cloud API has no rotation endpoint — flag is a pure client-side display hint (confirmed: HA integration same approach).
+
 ## [0.2.0] - 2026-05-13
 ### Added
 - `handlePrivacyToggle`: opens live session → sends RCP+ 0x0808 WRITE via cloud proxy
@@ -46,7 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LICENSE MIT
 - Compliance with `@iobroker/repochecker` (0 fixable errors/warnings remaining)
 
-[Unreleased]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/releases/tag/v0.0.1

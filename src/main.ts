@@ -12,7 +12,7 @@
  *   4. [live_session.ts] Open proxy session per camera (v0.2.0)
  *   5. [tls_proxy.ts]    Register RTSPS sources as local RTSP via TLS proxy (v0.2.0)
  *   6. [fcm.ts]          FCM push registration → motion/audio/person events (stub → v0.3.0)
- *   7. [rcp.ts]          RCP+ commands: privacy, light, image rotation (v0.2.0)
+ *   7. [rcp.ts]          RCP+ protocol helpers (unused since v0.3.0 — all commands use Cloud API)
  *   8. [snapshot.ts]     Snapshot fetch + write to adapter file-store (v0.2.0)
  */
 
@@ -41,12 +41,8 @@ import {
     type LiveSession,
 } from "./lib/live_session";
 
-import {
-    buildSetPrivacyFrame,
-    buildSetLightFrame,
-    buildSetImageRotationFrame,
-    sendRcpCommand,
-} from "./lib/rcp";
+// Note: rcp.ts (RCP+ commands) is no longer imported — all camera commands
+// (privacy, light, image rotation) now use the Bosch Cloud API exclusively.
 
 import { fetchSnapshot, buildSnapshotUrl } from "./lib/snapshot";
 
@@ -57,7 +53,7 @@ import {
 
 import {
     FcmListener,
-    FcmNotImplementedError,
+    FcmCbsRegistrationError,
     type FcmEventPayload,
 } from "./lib/fcm";
 
@@ -99,6 +95,20 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
     /** FCM push listener (null until onReady wires it up). */
     private _fcmListener: FcmListener | null = null;
+
+    /**
+     * Client-side image rotation flag per camera ID.
+     * Bosch Cloud API has no rotation endpoint — flag is stored here so
+     * downstream callers (snapshot post-processing, UI) can apply 180° transforms.
+     */
+    private _imageRotation: Record<string, boolean> = {};
+
+    /**
+     * ISO timestamp of the latest processed event per camera.
+     * Used by fetchAndProcessEvents() to skip events we've already seen.
+     * Keyed by camera ID. float('-inf') equivalent → empty string means "not seen".
+     */
+    private _lastSeenEventId: Record<string, string> = {};
 
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({
@@ -644,27 +654,6 @@ class BoschSmartHomeCamera extends utils.Adapter {
         return session;
     }
 
-    /**
-     * Derive the rcp.xml base URL from a live session.
-     *
-     * LOCAL:  "https://192.168.x.x:443/rcp.xml"
-     * REMOTE: "https://proxy-NN:42090/{hash}/rcp.xml"
-     */
-    private getRcpUrl(session: LiveSession): string {
-        // proxyUrl is the snap.jpg URL — strip the snap.jpg path and query to get the base
-        // e.g. "https://192.0.2.10:443/snap.jpg?JpegSize=1206" → "https://192.0.2.10:443/rcp.xml"
-        // e.g. "https://proxy-NN:42090/{hash}/snap.jpg?JpegSize=1206" → "https://proxy-NN:42090/{hash}/rcp.xml"
-        try {
-            const u = new URL(session.proxyUrl);
-            // Replace everything after the last '/' before snap.jpg
-            const basePath = u.pathname.replace(/\/snap\.jpg.*$/, "");
-            return `${u.protocol}//${u.host}${basePath}/rcp.xml`;
-        } catch {
-            // Fallback: simple string replacement
-            return session.proxyUrl.replace(/\/snap\.jpg.*$/, "/rcp.xml");
-        }
-    }
-
     // ── PKCE browser-login helpers ──────────────────────────────────────────
 
     /**
@@ -779,7 +768,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * 4. Create per-camera state tree
      * 5. Set info.connection = true
      * 6. Arm token refresh loop
-     * 7. Start FCM listener (stub → sets info.fcm_active = "stub")
+     * 7. Start FCM listener (real push via @aracna/fcm, sets info.fcm_active = "healthy")
      */
     private async onReady(): Promise<void> {
         this.log.info("Bosch Smart Home Camera adapter starting…");
@@ -877,25 +866,49 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.upsertState("info.connection", true);
         this.scheduleTokenRefresh(tokens.expires_in * 1000);
 
-        // ── Step 5: FCM listener (stub in v0.2.0) ──────────────────────────
+        // ── Step 5: FCM push listener (real implementation v0.3.0) ──────────
         this._fcmListener = new FcmListener(this._httpClient, tokens.access_token);
+
+        // Silent push wake-up — Bosch sends no payload; fetch events from API
+        this._fcmListener.on("push", () => { void this.fetchAndProcessEvents(); });
+
+        // Typed event fallback — when push contains explicit event-type data
         this._fcmListener.on("motion",      (ev: FcmEventPayload) => { void this.onFcmEvent(ev); });
         this._fcmListener.on("audio_alarm", (ev: FcmEventPayload) => { void this.onFcmEvent(ev); });
         this._fcmListener.on("person",      (ev: FcmEventPayload) => { void this.onFcmEvent(ev); });
+
+        // Registration success — log token prefix + mark healthy
+        this._fcmListener.on("registered", (creds: { fcmToken: string }) => {
+            this.log.info(`FCM registered: ${creds.fcmToken.substring(0, 12)}...`);
+            void this.setStateAsync("info.fcm_active", "healthy", true);
+        });
+
+        // Error events from FCM internals
+        this._fcmListener.on("error", (err: Error) => {
+            this.log.error(`FCM error: ${err.message}`);
+            void this.setStateAsync("info.fcm_active", "error", true);
+        });
+
+        // MTalk socket closed — adapter still usable via polling
+        this._fcmListener.on("disconnect", () => {
+            this.log.warn("FCM disconnected — adapter continues polling");
+            void this.setStateAsync("info.fcm_active", "disconnected", true);
+        });
 
         try {
             await this._fcmListener.start();
             await this.setStateAsync("info.fcm_active", "healthy", true);
             this.log.info("FCM push listener started");
         } catch (err: unknown) {
-            if (err instanceof FcmNotImplementedError) {
-                this.log.warn("FCM not implemented yet — using polling fallback in v0.3.0+");
-                await this.setStateAsync("info.fcm_active", "stub", true);
+            const msg = err instanceof Error ? err.message : String(err);
+            if (err instanceof FcmCbsRegistrationError) {
+                this.log.error(`FCM CBS registration failed (auth/token issue): ${msg}`);
+                await this.setStateAsync("info.fcm_active", "error", true);
             } else {
-                const msg = err instanceof Error ? err.message : String(err);
                 this.log.error(`FCM start failed: ${msg}`);
                 await this.setStateAsync("info.fcm_active", "error", true);
             }
+            // Don't crash — adapter still usable without push (slower polling)
         }
 
         this.log.info(
@@ -969,19 +982,80 @@ class BoschSmartHomeCamera extends utils.Adapter {
         );
     }
 
-    // ── Camera command handlers ─────────────────────────────────────────────
-
     /**
-     * Derive Digest credentials from a live session for LOCAL RCP+ calls.
-     * Cloud proxy URLs are pre-authenticated via the URL hash — return undefined
-     * so the REMOTE codepath is taken in sendRcpCommand().
+     * Fetch fresh events for all known cameras from the Bosch Cloud API.
+     *
+     * Called on every FCM "push" (silent wake-up — Bosch sends no event payload
+     * in the push itself). Mirrors Python async_handle_fcm_push() in fcm.py.
+     *
+     * Endpoint: GET /v11/events?videoInputId={camId}&limit=5
+     * Returns: array of event objects (newest first) or empty array.
+     *
+     * Event object fields (confirmed via HA integration):
+     *   { id, eventType, eventTags, timestamp/createdAt, videoInputId }
+     * Gen2: eventType=MOVEMENT + eventTags=["PERSON"] → normalise to "person"
      */
-    private getRcpAuth(session: LiveSession): { user: string; password: string } | undefined {
-        if (session.connectionType === "LOCAL") {
-            return { user: session.digestUser, password: session.digestPassword };
+    private async fetchAndProcessEvents(): Promise<void> {
+        if (!this._currentAccessToken) return;
+        const token = this._currentAccessToken;
+        const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
+
+        for (const [camId] of this._cameras) {
+            try {
+                const url = `https://residential.cbs.boschsecurity.com/v11/events?videoInputId=${camId}&limit=5`;
+                const resp = await this._httpClient.get(url, {
+                    headers,
+                    validateStatus: () => true,
+                });
+                if (resp.status !== 200 || !Array.isArray(resp.data) || resp.data.length === 0) {
+                    continue;
+                }
+
+                const events = resp.data as Array<Record<string, unknown>>;
+                const newest = events[0];
+                const newestId = (newest["id"] ?? "") as string;
+                const prevId = this._lastSeenEventId[camId] ?? "";
+
+                // Skip if we've already processed this event (dedup)
+                if (!newestId || newestId === prevId) continue;
+                this._lastSeenEventId[camId] = newestId;
+
+                // Normalise event type — mirrors HA fcm.py PERSON upgrade logic
+                const rawType = ((newest["eventType"] ?? "") as string).toUpperCase();
+                const tags = (newest["eventTags"] ?? []) as string[];
+                let eventType: string;
+                if (rawType === "MOVEMENT" && tags.includes("PERSON")) {
+                    eventType = "person";
+                } else if (rawType === "MOVEMENT") {
+                    eventType = "motion";
+                } else if (rawType === "AUDIO_ALARM") {
+                    eventType = "audio_alarm";
+                } else if (rawType === "PERSON") {
+                    eventType = "person";
+                } else {
+                    eventType = rawType.toLowerCase() || "motion";
+                }
+
+                // Timestamp — prefer ISO string, fall back to current time
+                const ts = ((newest["timestamp"] ?? newest["createdAt"] ?? "") as string)
+                    || new Date().toISOString();
+
+                const prefix = `cameras.${camId}`;
+                await this.setStateAsync(`${prefix}.last_motion_at`, ts, true);
+                await this.setStateAsync(`${prefix}.last_motion_event_type`, eventType, true);
+
+                this.log.info(
+                    `Motion event [${eventType}] for camera ${camId.slice(0, 8)} at ${ts} (id=${newestId.slice(0, 8)})`,
+                );
+            } catch (err: unknown) {
+                this.log.debug(
+                    `fetchAndProcessEvents failed for ${camId.slice(0, 8)}: ${(err as Error).message}`,
+                );
+            }
         }
-        return undefined;
     }
+
+    // ── Camera command handlers ─────────────────────────────────────────────
 
     /**
      * Privacy mode: PUT /v11/video_inputs/{camId}/privacy with
@@ -1060,13 +1134,19 @@ class BoschSmartHomeCamera extends utils.Adapter {
     }
 
     /**
-     * Image rotation: RCP+ command 0x0810 WRITE (Digest for LOCAL, hash for REMOTE).
+     * Image rotation: pure client-side flag — no Bosch Cloud API endpoint exists.
+     *
+     * Bosch's Cloud API has no image-rotation field (confirmed in the HA integration:
+     * "Cloud API does not expose any image-rotation field; this switch is a pure
+     * client-side display flag"). RCP+ 0x0810 returned HTTP 401 on Gen2 FW 9.40.25
+     * with valid Digest auth — and even if it worked, it would only affect the
+     * camera's own RTSP stream orientation, not how ioBroker consumers display it.
+     *
+     * The flag is stored in-memory (_imageRotation) so downstream callers (snapshot
+     * post-processing, UI consumers reading the state) can apply 180° transforms.
      */
     private async handleImageRotationToggle(camId: string, rotated180: boolean): Promise<void> {
-        const session = await this.ensureLiveSession(camId);
-        const rcpUrl = this.getRcpUrl(session);
-        const frame = buildSetImageRotationFrame(rotated180);
-        await sendRcpCommand(this._httpClient, rcpUrl, frame, undefined, this.getRcpAuth(session));
+        this._imageRotation[camId] = rotated180;
         this.log.info(
             `Image rotation ${rotated180 ? "180°" : "0°"} set for camera ${camId.slice(0, 8)}`,
         );

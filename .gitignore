@@ -33,6 +33,7 @@ coverage/
 issue-*-comment*.md
 forum-*-reply*.md
 update-posts-*.md
+simon42-*.md
 
 # release-script intermediate metadata
 .commitinfo
