@@ -110,6 +110,16 @@ class BoschSmartHomeCamera extends utils.Adapter {
      */
     private _lastSeenEventId: Record<string, string> = {};
 
+    /**
+     * Count of consecutive snapshot failures per camera ID.
+     * Used to flip `online=false` only after a sustained outage, not on the first
+     * transient network blip. Reset on every successful snapshot.
+     */
+    private _snapshotFailCount: Map<string, number> = new Map();
+
+    /** Consecutive snapshot failures before a camera is marked offline. */
+    private static readonly OFFLINE_THRESHOLD = 3;
+
     public constructor(options: Partial<utils.AdapterOptions> = {}) {
         super({
             ...options,
@@ -939,11 +949,26 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
         try {
             switch (stateName) {
-                case "privacy_enabled":
-                    await this.handlePrivacyToggle(camId, Boolean(state.val));
+                case "privacy_enabled": {
+                    const enabled = Boolean(state.val);
+                    await this.handlePrivacyToggle(camId, enabled);
+                    // Capture a fresh snapshot only when leaving privacy (live view is hidden while ON).
+                    // Fire-and-forget — snapshot fetch can take a few seconds and must not block the ack path.
+                    if (!enabled) {
+                        void this.handleSnapshotTrigger(camId).catch((err: unknown) => {
+                            const msg = err instanceof Error ? err.message : String(err);
+                            this.log.debug(`Auto-snapshot after privacy off failed for ${camId}: ${msg}`);
+                        });
+                    }
                     break;
+                }
                 case "light_enabled":
                     await this.handleLightToggle(camId, Boolean(state.val));
+                    // Refresh snapshot so the dashboard reflects the new lighting.
+                    void this.handleSnapshotTrigger(camId).catch((err: unknown) => {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        this.log.debug(`Auto-snapshot after light toggle failed for ${camId}: ${msg}`);
+                    });
                     break;
                 case "image_rotation_180":
                     await this.handleImageRotationToggle(camId, Boolean(state.val));
@@ -1179,16 +1204,24 @@ class BoschSmartHomeCamera extends utils.Adapter {
             // Only retry on "aborted" / connection-reset errors — not on auth (401)
             // or non-image content type (no point retrying those).
             const isTransient = /abort|reset|ECONNRESET|socket hang up|timeout/i.test(msg);
-            if (!isTransient) throw err;
+            if (!isTransient) {
+                await this.markCameraReachability(camId, false);
+                throw err;
+            }
 
             this.log.debug(`Snapshot retry for ${camId.slice(0, 8)}: ${msg}`);
             await new Promise((r) => setTimeout(r, 800));
-            buf = await fetchSnapshot(
-                snapUrl,
-                session.connectionType,
-                session.digestUser,
-                session.digestPassword,
-            );
+            try {
+                buf = await fetchSnapshot(
+                    snapUrl,
+                    session.connectionType,
+                    session.digestUser,
+                    session.digestPassword,
+                );
+            } catch (retryErr) {
+                await this.markCameraReachability(camId, false);
+                throw retryErr;
+            }
         }
 
         const filePath = `cameras/${camId}/snapshot.jpg`;
@@ -1198,7 +1231,29 @@ class BoschSmartHomeCamera extends utils.Adapter {
             `/${this.namespace}/${filePath}`,
             true,
         );
+        await this.markCameraReachability(camId, true);
         this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
+    }
+
+    /**
+     * Update `cameras.<id>.online` based on snapshot reachability.
+     *
+     * Bosch's list endpoint does not expose connectivity, so the only signal we have
+     * is whether snapshot fetches succeed. We mark a camera offline only after
+     * {@link BoschSmartHomeCamera.OFFLINE_THRESHOLD} consecutive failures —
+     * a single transient "stream has been aborted" must not flip the state.
+     */
+    private async markCameraReachability(camId: string, reachable: boolean): Promise<void> {
+        if (reachable) {
+            if (this._snapshotFailCount.get(camId)) this._snapshotFailCount.delete(camId);
+            await this.setStateAsync(`cameras.${camId}.online`, true, true);
+            return;
+        }
+        const failures = (this._snapshotFailCount.get(camId) ?? 0) + 1;
+        this._snapshotFailCount.set(camId, failures);
+        if (failures >= BoschSmartHomeCamera.OFFLINE_THRESHOLD) {
+            await this.setStateAsync(`cameras.${camId}.online`, false, true);
+        }
     }
 
     /**

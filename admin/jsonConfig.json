@@ -21,7 +21,11 @@
             "de": "Die Login-URL wird bei jedem Adapter-Start automatisch ins Log geschrieben. Zu finden in ioBroker → Log Inspector (Filter 'bosch-smart-home-camera') — die Zeile beginnt mit 'Login required. Open this URL in your browser…'. Diese URL kopieren, im Browser öffnen und mit dem Bosch-Konto einloggen (Captcha/MFA lösen). Bosch leitet dich anschließend zu https://www.bosch.com/boschcam?code=XXX&state=YYY weiter — diese vollständige URL aus der Adressleiste des Browsers kopieren."
           },
           "newLine": true,
-          "sm": 12
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12
         },
         "_info_step2": {
           "type": "header",
@@ -44,7 +48,11 @@
             "de": "Vollständige URL aus der Browser-Adressleiste nach der Bosch-Weiterleitung einfügen. Leer lassen, wenn noch kein Login erfolgt ist — der Adapter gibt die Login-URL beim Start im Log aus."
           },
           "newLine": true,
+          "xs": 12,
           "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12,
           "trim": true
         },
         "region": {
@@ -63,8 +71,11 @@
             { "label": "United States (US)", "value": "US" }
           ],
           "newLine": true,
+          "xs": 12,
           "sm": 12,
-          "md": 4
+          "md": 4,
+          "lg": 4,
+          "xl": 4
         }
       }
     }
