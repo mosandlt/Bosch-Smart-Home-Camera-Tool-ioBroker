@@ -37,3 +37,6 @@ simon42-*.md
 
 # release-script intermediate metadata
 .commitinfo
+
+# Integration tests rely on live cameras + manual env vars — keep out of CI/release
+test/integration/

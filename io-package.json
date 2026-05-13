@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "news": {
+      "0.3.1": {
+        "en": "VIS-2 example dashboard fixes (canvas height, native widget templates, status bar labels). Auto-snapshot fetch after Privacy=off or Light toggle so dashboards reflect new state immediately. Camera online state now reflects snapshot reachability (true on success, false after 3 consecutive failures). Repochecker compliance: dependency bumps, schema fixes, workflow restructure for Latest-Repo submission.",
+        "de": "VIS-2-Beispiel-Dashboard-Fixes (Canvas-Höhe, native Widget-Templates, Statusbar-Labels). Automatischer Snapshot nach Privacy=aus oder Licht-Toggle, damit Dashboards den neuen Zustand sofort anzeigen. Kamera-Online-Status reflektiert jetzt die Snapshot-Erreichbarkeit (true bei Erfolg, false nach 3 aufeinanderfolgenden Fehlern). Repochecker-Compliance: Dependency-Bumps, Schema-Fixes, Workflow-Umbau für Latest-Repo-Submission.",
+        "ru": "Исправления примера панели VIS-2 (высота холста, нативные шаблоны виджетов, метки строки состояния). Автоматический снимок после Privacy=выкл или переключения света, чтобы панели сразу отражали новое состояние. Состояние камеры онлайн теперь отражает доступность снимков (true при успехе, false после 3 последовательных сбоев). Соответствие Repochecker: обновления зависимостей, исправления схемы, перестройка workflow для отправки в Latest-Repo.",
+        "pt": "Correções no painel de exemplo VIS-2 (altura do canvas, templates de widget nativos, rótulos da barra de status). Captura automática de snapshot após Privacy=off ou alternar Luz para que os painéis reflitam o novo estado imediatamente. Estado online da câmera agora reflete a acessibilidade do snapshot (true em sucesso, false após 3 falhas consecutivas). Compliance Repochecker: atualizações de dependências, correções de schema, reestruturação do workflow para submissão Latest-Repo.",
+        "nl": "VIS-2 voorbeeld-dashboard fixes (canvashoogte, native widget-templates, statusbalk-labels). Automatische snapshot na Privacy=uit of Licht-toggle zodat dashboards de nieuwe staat direct weergeven. Camera online-status weerspiegelt nu de bereikbaarheid van snapshots (true bij succes, false na 3 opeenvolgende fouten). Repochecker compliance: dependency bumps, schema-fixes, workflow herstructurering voor Latest-Repo-inzending.",
+        "fr": "Corrections du tableau de bord d'exemple VIS-2 (hauteur du canvas, templates de widgets natifs, étiquettes de la barre d'état). Capture automatique de snapshot après Privacy=off ou bascule de la Lumière pour que les tableaux de bord reflètent immédiatement le nouvel état. L'état en ligne de la caméra reflète maintenant l'accessibilité du snapshot (vrai en cas de succès, faux après 3 échecs consécutifs). Conformité Repochecker : mises à jour des dépendances, corrections de schéma, restructuration du workflow pour la soumission Latest-Repo.",
+        "it": "Correzioni della dashboard esempio VIS-2 (altezza canvas, template widget nativi, etichette della barra di stato). Acquisizione automatica di snapshot dopo Privacy=off o toggle della Luce in modo che le dashboard riflettano immediatamente il nuovo stato. Stato online della telecamera ora riflette la raggiungibilità dello snapshot (true in caso di successo, false dopo 3 errori consecutivi). Conformità Repochecker: aggiornamenti delle dipendenze, correzioni dello schema, ristrutturazione del workflow per la submission Latest-Repo.",
+        "es": "Correcciones del panel de ejemplo VIS-2 (altura del lienzo, plantillas de widgets nativos, etiquetas de la barra de estado). Captura automática de snapshot después de Privacy=off o alternar la Luz para que los paneles reflejen el nuevo estado de inmediato. El estado en línea de la cámara ahora refleja la accesibilidad del snapshot (true en caso de éxito, false después de 3 fallos consecutivos). Cumplimiento de Repochecker: actualizaciones de dependencias, correcciones de esquema, reestructuración del workflow para la envío Latest-Repo.",
+        "pl": "Poprawki przykładowego pulpitu VIS-2 (wysokość kanwy, natywne szablony widgetów, etykiety paska stanu). Automatyczna migawka po Privacy=off lub przełączeniu Światła, aby pulpity natychmiast odzwierciedlały nowy stan. Stan online kamery odzwierciedla teraz dostępność migawki (true przy sukcesie, false po 3 kolejnych niepowodzeniach). Zgodność z Repochecker: aktualizacje zależności, poprawki schematu, restrukturyzacja workflow do zgłoszenia Latest-Repo.",
+        "uk": "Виправлення прикладної панелі VIS-2 (висота полотна, нативні шаблони віджетів, мітки рядка стану). Автоматичний знімок після Privacy=вимкнено або перемикання Світла, щоб панелі негайно відображали новий стан. Стан камери онлайн тепер відображає досяжність знімка (true при успіху, false після 3 послідовних збоїв). Сумісність з Repochecker: оновлення залежностей, виправлення схеми, реструктуризація workflow для подання Latest-Repo.",
+        "zh-cn": "VIS-2 示例仪表板修复（画布高度、原生小部件模板、状态栏标签）。Privacy=关闭或灯光切换后自动获取快照，使仪表板立即反映新状态。摄像头在线状态现在反映快照可达性（成功时为 true，连续 3 次失败后为 false）。Repochecker 合规性：依赖项升级、架构修复、工作流重组以提交到 Latest-Repo。"
+      },
       "0.3.0": {
         "en": "FCM push events live: motion/audio/person events via @aracna/fcm MTalk/MCS (replaces v0.2.0 stub). Image rotation fixed: pure client-side flag, no RCP+ needed.",
         "de": "FCM-Push-Ereignisse live: Bewegungs-/Audio-/Personen-Events via @aracna/fcm MTalk/MCS (ersetzt v0.2.0-Stub). Bildrotation korrigiert: reines Client-Flag, kein RCP+ erforderlich.",
@@ -85,7 +98,15 @@
     "authors": [
       "mosandlt <10558666+mosandlt@users.noreply.github.com>"
     ],
-    "keywords": ["bosch", "camera", "eyes", "smart-home", "rtsp", "fcm", "cloud"],
+    "keywords": [
+      "bosch",
+      "camera",
+      "eyes",
+      "smart-home",
+      "rtsp",
+      "fcm",
+      "cloud"
+    ],
     "licenseInformation": {
       "type": "free",
       "license": "MIT"
@@ -107,12 +128,17 @@
     },
     "dependencies": [
       {
-        "js-controller": ">=5.0.19"
+        "js-controller": ">=6.0.11"
       }
     ],
-    "encryptedNative": [],
-    "protectedNative": []
+    "globalDependencies": [
+      {
+        "admin": ">=7.6.17"
+      }
+    ]
   },
+  "encryptedNative": [],
+  "protectedNative": [],
   "native": {
     "redirect_url": "",
     "region": "EU"
@@ -121,7 +147,9 @@
     {
       "_id": "info",
       "type": "channel",
-      "common": { "name": "Information" },
+      "common": {
+        "name": "Information"
+      },
       "native": {}
     },
     {
@@ -206,7 +234,9 @@
     {
       "_id": "cameras",
       "type": "device",
-      "common": { "name": "Bosch cameras" },
+      "common": {
+        "name": "Bosch cameras"
+      },
       "native": {}
     }
   ],

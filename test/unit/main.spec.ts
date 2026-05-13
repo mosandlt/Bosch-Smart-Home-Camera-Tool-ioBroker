@@ -804,4 +804,167 @@ describe("main adapter — v0.2.0 command handlers", () => {
             "sendRcpCommand must still be 0 after rotation-off toggle",
         ).to.equal(0);
     });
+
+    // ── Auto-snapshot after state changes (forum-feedback v0.3.1) ──────────────
+    //
+    // User report (forum-replies/iobroker-tester-topic): after toggling Privacy
+    // OFF or the camera light, the VIS dashboard snapshot stayed stale until the
+    // next 5 s refresh interval. The handler must now fire a snapshot fetch
+    // fire-and-forget on the side-effecting toggles.
+    //   - privacy_enabled=false → auto-snapshot (camera live view returned)
+    //   - privacy_enabled=true  → NO auto-snapshot (camera is hidden anyway)
+    //   - light_enabled=any     → auto-snapshot (lighting changed)
+
+    /** Yield twice to the event loop so void-Promise auto-snapshots can run + write state. */
+    async function flushAutoSnapshot(): Promise<void> {
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+        await new Promise((r) => setImmediate(r));
+    }
+
+    it("onStateChange privacy_enabled=false fires auto-snapshot (live view returned)", async () => {
+        const fetchSnapshotStub = sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        const { adapter } = createAdapterWithMocks({
+            fetchSnapshot: fetchSnapshotStub,
+            extraAxiosResponses: [{ status: 200, data: {} }], // PUT /privacy ack
+        });
+        await adapter.readyHandler!();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.privacy_enabled`;
+
+        await adapter.stateChangeHandler!(stateId, { val: false, ack: false, ts: 0, lc: 0, from: "" });
+        await flushAutoSnapshot();
+
+        expect(
+            fetchSnapshotStub.callCount,
+            "fetchSnapshot must fire after privacy=false",
+        ).to.be.greaterThanOrEqual(1);
+    });
+
+    it("onStateChange privacy_enabled=true does NOT fire auto-snapshot (camera hidden)", async () => {
+        const fetchSnapshotStub = sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        const { adapter } = createAdapterWithMocks({
+            fetchSnapshot: fetchSnapshotStub,
+            extraAxiosResponses: [{ status: 200, data: {} }], // PUT /privacy ack
+        });
+        await adapter.readyHandler!();
+
+        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.privacy_enabled`;
+
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await flushAutoSnapshot();
+
+        expect(
+            fetchSnapshotStub.callCount,
+            "fetchSnapshot must NOT fire when entering privacy mode",
+        ).to.equal(0);
+    });
+
+    it("onStateChange light_enabled toggle fires auto-snapshot (lighting changed)", async () => {
+        const fetchSnapshotStub = sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        const { adapter } = createAdapterWithMocks({
+            fetchSnapshot: fetchSnapshotStub,
+            extraAxiosResponses: [
+                { status: 200, data: {} }, // PUT /lighting/switch/front
+                { status: 200, data: {} }, // PUT /lighting/switch/topdown (Gen2)
+            ],
+        });
+        await adapter.readyHandler!();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.light_enabled`;
+
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        await flushAutoSnapshot();
+
+        expect(
+            fetchSnapshotStub.callCount,
+            "fetchSnapshot must fire after light toggle",
+        ).to.be.greaterThanOrEqual(1);
+    });
+
+    // ── Camera reachability / online state ────────────────────────────────────
+    //
+    // Bosch's list endpoint does not expose connectivity, so the only signal is
+    // snapshot success/failure. A single transient "stream has been aborted"
+    // (Gen2 idle hiccup) must NOT flip the camera offline — only after
+    // OFFLINE_THRESHOLD consecutive failures.
+
+    it("snapshot success sets cameras.<id>.online=true", async () => {
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+        });
+        await adapter.readyHandler!();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        const camId   = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
+
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+
+        const online = db.getState(`${adapter.namespace}.cameras.${camId}.online`) as
+            | ioBroker.State
+            | undefined;
+        expect(online?.val, "online must be true after successful snapshot").to.equal(true);
+    });
+
+    it("camera flips to offline only after OFFLINE_THRESHOLD consecutive snapshot failures", async () => {
+        // 1st call succeeds (camera proven online), then non-transient failures so retry
+        // doesn't kick in. Each ioBroker stateChange → snapshot_trigger → 1 fetchSnapshot call.
+        const fetchSnapshotStub = sinon.stub();
+        fetchSnapshotStub.onCall(0).resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        fetchSnapshotStub.rejects(new Error("HTTP 401: snapshot auth rejected"));
+
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: fetchSnapshotStub,
+        });
+        await adapter.readyHandler!();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        const camId    = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId  = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
+        const onlineId = `${adapter.namespace}.cameras.${camId}.online`;
+
+        // Success → online=true
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        let online = db.getState(onlineId) as ioBroker.State | undefined;
+        expect(online?.val, "online must be true after a successful snapshot").to.equal(true);
+
+        // Fail #1 — must NOT flip back to offline yet
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        online = db.getState(onlineId) as ioBroker.State | undefined;
+        expect(
+            online?.val,
+            "online must stay true after a single failure (could be transient)",
+        ).to.equal(true);
+
+        // Fail #2 — still online
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        online = db.getState(onlineId) as ioBroker.State | undefined;
+        expect(online?.val, "online must stay true after 2 failures").to.equal(true);
+
+        // Fail #3 — threshold reached, now offline
+        await adapter.stateChangeHandler!(stateId, { val: true, ack: false, ts: 0, lc: 0, from: "" });
+        online = db.getState(onlineId) as ioBroker.State | undefined;
+        expect(
+            online?.val,
+            "online must flip to false after OFFLINE_THRESHOLD (3) consecutive failures",
+        ).to.equal(false);
+    });
 });

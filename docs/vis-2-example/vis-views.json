@@ -1,0 +1,625 @@
+{
+  "___settings": {
+    "folders": [],
+    "openedViews": [
+      "Cameras"
+    ],
+    "darkReloadScreen": false,
+    "destroyViewsAfter": 1,
+    "marketplace": [],
+    "ts": "",
+    "scripts": "",
+    "themeName": "dark"
+  },
+  "Cameras": {
+    "name": "Cameras",
+    "rerender": false,
+    "activeWidgets": [],
+    "filterList": [],
+    "settings": {
+      "useAsDefault": true,
+      "comment": "Bosch Smart Home Cameras — auto-generated dashboard. Snapshot refresh = 5 s. Each card: snapshot image, privacy switch, light switch, snapshot trigger button.",
+      "sizex": 1200,
+      "sizey": 900,
+      "navigation": false,
+      "navigationTitle": "Bosch Cameras",
+      "theme": "dark",
+      "useBackground": true,
+      "background": "#1a1a1a"
+    },
+    "widgets": {
+      "w00001": {
+        "tpl": "tplImage",
+        "data": {
+          "src": "/bosch-smart-home-camera.0/cameras/11111111-1111-1111-1111-111111111111/snapshot.jpg",
+          "refreshInterval": 5000,
+          "stretch": true,
+          "name": "Terrasse",
+          "g_visibility": "",
+          "g_fixed": ""
+        },
+        "style": {
+          "left": "20px",
+          "top": "60px",
+          "width": "560px",
+          "height": "315px",
+          "border": "2px solid #555",
+          "border-radius": "8px",
+          "z-index": "0",
+          "background": "#000"
+        },
+        "widgetSet": "basic"
+      },
+      "w00002": {
+        "tpl": "tplValueString",
+        "data": {
+          "oid": "bosch-smart-home-camera.0.cameras.11111111-1111-1111-1111-111111111111.name",
+          "name": "Terrasse Label",
+          "font-color": "#ffffff",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "30px",
+          "top": "70px",
+          "width": "200px",
+          "height": "30px",
+          "font-size": "20px",
+          "color": "#fff",
+          "font-weight": "bold",
+          "text-shadow": "2px 2px 4px #000",
+          "z-index": "1"
+        },
+        "widgetSet": "basic"
+      },
+      "w00003": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.11111111-1111-1111-1111-111111111111.privacy_enabled",
+          "text_false": "🔒 Privacy OFF",
+          "text_true": "🔒 Privacy ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "20px",
+          "top": "395px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00004": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.11111111-1111-1111-1111-111111111111.light_enabled",
+          "text_false": "💡 Light OFF",
+          "text_true": "💡 Light ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "160px",
+          "top": "395px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00005": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.11111111-1111-1111-1111-111111111111.snapshot_trigger",
+          "pushMode": true,
+          "text_false": "📷 Take Snapshot",
+          "text_true": "📷 Take Snapshot",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "padding": 4,
+          "variant": "contained",
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "300px",
+          "top": "395px",
+          "width": "140px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00006": {
+        "tpl": "tplImage",
+        "data": {
+          "src": "/bosch-smart-home-camera.0/cameras/22222222-2222-2222-2222-222222222222/snapshot.jpg",
+          "refreshInterval": 5000,
+          "stretch": true,
+          "name": "Innenbereich",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "600px",
+          "top": "60px",
+          "width": "560px",
+          "height": "315px",
+          "border": "2px solid #555",
+          "border-radius": "8px",
+          "z-index": "0",
+          "background": "#000"
+        },
+        "widgetSet": "basic"
+      },
+      "w00007": {
+        "tpl": "tplValueString",
+        "data": {
+          "oid": "bosch-smart-home-camera.0.cameras.22222222-2222-2222-2222-222222222222.name",
+          "name": "Innenbereich Label",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "610px",
+          "top": "70px",
+          "width": "200px",
+          "height": "30px",
+          "font-size": "20px",
+          "color": "#fff",
+          "font-weight": "bold",
+          "text-shadow": "2px 2px 4px #000",
+          "z-index": "1"
+        },
+        "widgetSet": "basic"
+      },
+      "w00008": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.22222222-2222-2222-2222-222222222222.privacy_enabled",
+          "text_false": "🔒 Privacy OFF",
+          "text_true": "🔒 Privacy ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "600px",
+          "top": "395px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00009": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.22222222-2222-2222-2222-222222222222.light_enabled",
+          "text_false": "💡 Light OFF",
+          "text_true": "💡 Light ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "740px",
+          "top": "395px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00010": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.22222222-2222-2222-2222-222222222222.snapshot_trigger",
+          "pushMode": true,
+          "text_false": "📷 Take Snapshot",
+          "text_true": "📷 Take Snapshot",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "padding": 4,
+          "variant": "contained",
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "880px",
+          "top": "395px",
+          "width": "140px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00011": {
+        "tpl": "tplImage",
+        "data": {
+          "src": "/bosch-smart-home-camera.0/cameras/33333333-3333-3333-3333-333333333333/snapshot.jpg",
+          "refreshInterval": 5000,
+          "stretch": true,
+          "name": "Kamera",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "20px",
+          "top": "480px",
+          "width": "560px",
+          "height": "315px",
+          "border": "2px solid #555",
+          "border-radius": "8px",
+          "z-index": "0",
+          "background": "#000"
+        },
+        "widgetSet": "basic"
+      },
+      "w00012": {
+        "tpl": "tplValueString",
+        "data": {
+          "oid": "bosch-smart-home-camera.0.cameras.33333333-3333-3333-3333-333333333333.name",
+          "name": "Kamera Label",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "30px",
+          "top": "490px",
+          "width": "200px",
+          "height": "30px",
+          "font-size": "20px",
+          "color": "#fff",
+          "font-weight": "bold",
+          "text-shadow": "2px 2px 4px #000",
+          "z-index": "1"
+        },
+        "widgetSet": "basic"
+      },
+      "w00013": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.33333333-3333-3333-3333-333333333333.privacy_enabled",
+          "text_false": "🔒 Privacy OFF",
+          "text_true": "🔒 Privacy ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "20px",
+          "top": "815px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00014": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.33333333-3333-3333-3333-333333333333.light_enabled",
+          "text_false": "💡 Light OFF",
+          "text_true": "💡 Light ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "160px",
+          "top": "815px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00015": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.33333333-3333-3333-3333-333333333333.snapshot_trigger",
+          "pushMode": true,
+          "text_false": "📷 Take Snapshot",
+          "text_true": "📷 Take Snapshot",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "padding": 4,
+          "variant": "contained",
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "300px",
+          "top": "815px",
+          "width": "140px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00016": {
+        "tpl": "tplImage",
+        "data": {
+          "src": "/bosch-smart-home-camera.0/cameras/44444444-4444-4444-4444-444444444444/snapshot.jpg",
+          "refreshInterval": 5000,
+          "stretch": true,
+          "name": "Haustüre",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "600px",
+          "top": "480px",
+          "width": "560px",
+          "height": "315px",
+          "border": "2px solid #555",
+          "border-radius": "8px",
+          "z-index": "0",
+          "background": "#000"
+        },
+        "widgetSet": "basic"
+      },
+      "w00017": {
+        "tpl": "tplValueString",
+        "data": {
+          "oid": "bosch-smart-home-camera.0.cameras.44444444-4444-4444-4444-444444444444.name",
+          "name": "Haustüre Label",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "610px",
+          "top": "490px",
+          "width": "200px",
+          "height": "30px",
+          "font-size": "20px",
+          "color": "#fff",
+          "font-weight": "bold",
+          "text-shadow": "2px 2px 4px #000",
+          "z-index": "1"
+        },
+        "widgetSet": "basic"
+      },
+      "w00018": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.44444444-4444-4444-4444-444444444444.privacy_enabled",
+          "text_false": "🔒 Privacy OFF",
+          "text_true": "🔒 Privacy ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "600px",
+          "top": "815px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00019": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.44444444-4444-4444-4444-444444444444.light_enabled",
+          "text_false": "💡 Light OFF",
+          "text_true": "💡 Light ON",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "jquery_style": false,
+          "padding": 4,
+          "variant": "contained",
+          "equal_text_length": true,
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_icon_false": "",
+          "g_icon_true": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "740px",
+          "top": "815px",
+          "width": "120px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00020": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "button",
+          "oid": "bosch-smart-home-camera.0.cameras.44444444-4444-4444-4444-444444444444.snapshot_trigger",
+          "pushMode": true,
+          "text_false": "📷 Take Snapshot",
+          "text_true": "📷 Take Snapshot",
+          "color_false": "#fff",
+          "color_true": "#fff",
+          "padding": 4,
+          "variant": "contained",
+          "g_visibility": "",
+          "g_common": "",
+          "g_text": "",
+          "g_style": ""
+        },
+        "style": {
+          "left": "880px",
+          "top": "815px",
+          "width": "140px",
+          "height": "50px",
+          "z-index": "1",
+          "color": "#fff"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00021": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "html",
+          "oid": "nothing_selected",
+          "readOnly": true,
+          "html_true": "<div style=\"font:14px/30px sans-serif;color:#aaa;\">Connection:</div>",
+          "html_false": "<div style=\"font:14px/30px sans-serif;color:#aaa;\">Connection:</div>",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "20px",
+          "top": "10px",
+          "width": "100px",
+          "height": "30px",
+          "z-index": "1"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00022": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "html",
+          "oid": "bosch-smart-home-camera.0.info.connection",
+          "readOnly": true,
+          "html_true": "<div style=\"font:14px/30px sans-serif;color:#4caf50;font-weight:bold;\">✓ online</div>",
+          "html_false": "<div style=\"font:14px/30px sans-serif;color:#ff5252;font-weight:bold;\">✗ offline</div>",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "130px",
+          "top": "10px",
+          "width": "120px",
+          "height": "30px",
+          "z-index": "1"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00023": {
+        "tpl": "tplJquiBool",
+        "data": {
+          "type": "html",
+          "oid": "nothing_selected",
+          "readOnly": true,
+          "html_true": "<div style=\"font:14px/30px sans-serif;color:#aaa;\">FCM:</div>",
+          "html_false": "<div style=\"font:14px/30px sans-serif;color:#aaa;\">FCM:</div>",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "280px",
+          "top": "10px",
+          "width": "100px",
+          "height": "30px",
+          "z-index": "1"
+        },
+        "widgetSet": "jqui"
+      },
+      "w00024": {
+        "tpl": "tplValueString",
+        "data": {
+          "oid": "bosch-smart-home-camera.0.info.fcm_active",
+          "html_prepend": "<span style='font:14px/30px sans-serif;font-weight:bold;'>",
+          "html_append": "</span>",
+          "g_visibility": ""
+        },
+        "style": {
+          "left": "330px",
+          "top": "10px",
+          "width": "160px",
+          "height": "30px",
+          "color": "#ffd54f",
+          "font-size": "14px",
+          "z-index": "1"
+        },
+        "widgetSet": "basic"
+      }
+    },
+    "filterWidgets": [],
+    "filterInvert": false
+  }
+}

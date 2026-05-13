@@ -47,6 +47,14 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * Keyed by camera ID. float('-inf') equivalent → empty string means "not seen".
      */
     private _lastSeenEventId;
+    /**
+     * Count of consecutive snapshot failures per camera ID.
+     * Used to flip `online=false` only after a sustained outage, not on the first
+     * transient network blip. Reset on every successful snapshot.
+     */
+    private _snapshotFailCount;
+    /** Consecutive snapshot failures before a camera is marked offline. */
+    private static readonly OFFLINE_THRESHOLD;
     constructor(options?: Partial<utils.AdapterOptions>);
     /**
      * Write a state only if the value changed (iobroker.ring upsertState pattern).
@@ -188,6 +196,15 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * HA integration's snap.jpg retry pattern.
      */
     private handleSnapshotTrigger;
+    /**
+     * Update `cameras.<id>.online` based on snapshot reachability.
+     *
+     * Bosch's list endpoint does not expose connectivity, so the only signal we have
+     * is whether snapshot fetches succeed. We mark a camera offline only after
+     * {@link BoschSmartHomeCamera.OFFLINE_THRESHOLD} consecutive failures —
+     * a single transient "stream has been aborted" must not flip the state.
+     */
+    private markCameraReachability;
     /**
      * Called when the adapter is stopped.
      * Cleans up TLS proxies, FCM listener, live sessions, and the refresh timer.

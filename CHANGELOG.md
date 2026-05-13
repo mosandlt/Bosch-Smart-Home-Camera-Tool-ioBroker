@@ -5,7 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.1] - 2026-05-13
+### Added
+- Auto-snapshot fetch after `privacy_enabled=false` and `light_enabled` toggle so dashboards reflect the new state immediately
+- `cameras.<id>.online` now reflects snapshot reachability — true on success, false after 3 consecutive failures
+- VIS-2 example dashboard (`docs/vis-2-example/`): canvas height 800→900, `tplBulbOnOff` (vis-1) → `tplJquiBool` (vis-2 native single-button toggle), status bar with `Connection:` / `FCM:` prefix labels
+- 11 new tests (310 total)
+
+### Changed
+- Dependencies bumped: `@iobroker/adapter-core` 3.2.2 → 3.3.2, `@iobroker/testing` 4.1.3 → 5.2.2, `@iobroker/adapter-dev` 1.3.0 → 1.5.0
+- `io-package.json` schema compliance: `js-controller` min version 5.0.19 → 6.0.11, `admin` ≥7.6.17 added to `globalDependencies`, `encryptedNative`/`protectedNative` moved from `/common` to root level
+- GitHub Actions workflow split into `check-and-lint` + `adapter-tests` + `deploy` jobs, concurrency cancellation, semver tag patterns
+- `admin/jsonConfig.json`: full `xs/sm/md/lg/xl` size attributes on all interactive fields
+
+### Fixed
+- VIS-2 dashboard rendered "Unbekannter Widget-Typ tplBulbOnOff" because that template only exists in vis-1; switched to vis-2 native `tplJquiBool`
 
 ## [0.3.0] - 2026-05-13
 ### Added
