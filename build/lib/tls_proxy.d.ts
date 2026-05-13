@@ -52,6 +52,8 @@ export interface TlsProxyOptions {
  * on localhost. go2rtc / FFmpeg can then connect to rtsp://127.0.0.1:PORT/...
  *
  * Returns a TlsProxyHandle with the chosen port and a stop() method.
+ *
+ * @param options
  */
 export declare function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>;
 //# sourceMappingURL=tls_proxy.d.ts.map

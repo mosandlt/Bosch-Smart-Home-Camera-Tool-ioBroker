@@ -19,6 +19,9 @@
  */
 export declare class SnapshotError extends Error {
     readonly cause?: unknown;
+    /**
+     *
+     */
     constructor(message: string, cause?: unknown);
 }
 /**
@@ -48,6 +51,7 @@ export declare function buildSnapshotUrl(proxyUrl: string, jpegSize?: number): s
  * @param connectionType  "LOCAL" → Digest auth; "REMOTE" → plain GET
  * @param user            Digest username (cbs-<USERNAME> for LOCAL; ignored for REMOTE)
  * @param password        Digest password (for LOCAL; ignored for REMOTE)
+ * @param options
  * @param options.timeout Request timeout in ms (default 6000 — matches HA's 6 s cap)
  * @returns               JPEG image bytes as Buffer
  * @throws SnapshotError  On non-200 status / non-image content-type / empty body / network error

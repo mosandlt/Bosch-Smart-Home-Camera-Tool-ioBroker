@@ -102,6 +102,8 @@ const GEN2_HARDWARE_VERSIONS = new Set([
  * Gen1 values: INDOOR, CAMERA_360, OUTDOOR, CAMERA_EYES, and all unknown strings
  *
  * Mirrors the MODELS registry in HA models.py.
+ *
+ * @param hardwareVersion
  */
 export function detectGeneration(hardwareVersion: string): 1 | 2 {
     return GEN2_HARDWARE_VERSIONS.has(hardwareVersion) ? 2 : 1;
@@ -113,6 +115,8 @@ export function detectGeneration(hardwareVersion: string): 1 | 2 {
  * Map a raw API camera object to a typed BoschCamera.
  * Returns null if the required `id` field is missing or empty.
  * Missing name/hardwareVersion/firmwareVersion fields get safe defaults.
+ *
+ * @param raw
  */
 function mapCamera(raw: RawCameraItem): BoschCamera | null {
     const id = typeof raw.id === "string" ? raw.id.trim() : "";
@@ -120,15 +124,15 @@ function mapCamera(raw: RawCameraItem): BoschCamera | null {
         return null;
     }
     const name = typeof raw.title === "string" && raw.title ? raw.title : id;
-    const hw   = typeof raw.hardwareVersion === "string" ? raw.hardwareVersion : "";
-    const fw   = typeof raw.firmwareVersion === "string" ? raw.firmwareVersion : "";
+    const hw = typeof raw.hardwareVersion === "string" ? raw.hardwareVersion : "";
+    const fw = typeof raw.firmwareVersion === "string" ? raw.firmwareVersion : "";
     return {
         id,
         name,
         hardwareVersion: hw,
         firmwareVersion: fw,
         generation: detectGeneration(hw),
-        online: false,   // list endpoint does not include connection state
+        online: false, // list endpoint does not include connection state
     };
 }
 
@@ -149,15 +153,12 @@ export async function fetchCameras(
     token: string,
 ): Promise<BoschCamera[]> {
     try {
-        const resp = await httpClient.get<unknown>(
-            `${CLOUD_API}/v11/video_inputs`,
-            {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept:        "application/json",
-                },
+        const resp = await httpClient.get<unknown>(`${CLOUD_API}/v11/video_inputs`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/json",
             },
-        );
+        });
 
         const data = resp.data;
         if (!Array.isArray(data)) {
@@ -182,14 +183,10 @@ export async function fetchCameras(
                 );
             }
             if (status !== undefined && status >= 500) {
-                throw new CamerasApiError(
-                    `Cameras API HTTP ${status}`,
-                );
+                throw new CamerasApiError(`Cameras API HTTP ${status}`);
             }
             // Network/timeout (no response) → CamerasApiError
-            throw new CamerasApiError(
-                `Cameras API network error: ${err.message}`,
-            );
+            throw new CamerasApiError(`Cameras API network error: ${err.message}`);
         }
         throw err;
     }

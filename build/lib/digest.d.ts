@@ -23,16 +23,40 @@
 import { type Method } from "axios";
 /** Parsed Digest challenge directives from WWW-Authenticate header */
 export interface DigestChallenge {
+    /**
+     *
+     */
     realm: string;
+    /**
+     *
+     */
     nonce: string;
+    /**
+     *
+     */
     opaque?: string;
+    /**
+     *
+     */
     qop?: string;
+    /**
+     *
+     */
     algorithm?: string;
 }
 /** Options for digestRequest() */
 export interface DigestRequestOptions {
+    /**
+     *
+     */
     method?: Method;
+    /**
+     *
+     */
     data?: string | Buffer;
+    /**
+     *
+     */
     headers?: Record<string, string>;
     /** Timeout in milliseconds (default: 10_000) */
     timeout?: number;
@@ -44,14 +68,24 @@ export interface DigestRequestOptions {
 }
 /** Result of a digest-authenticated request */
 export interface DigestResponse {
+    /**
+     *
+     */
     status: number;
+    /**
+     *
+     */
     headers: Record<string, string>;
+    /**
+     *
+     */
     data: Buffer;
 }
 /**
  * Parse the WWW-Authenticate: Digest header into a DigestChallenge object.
  * Mirrors Python _parse_digest_challenge() in auth_utils.py.
  *
+ * @param wwwAuthenticate
  * @throws Error if the header is not a Digest challenge or missing `nonce`
  */
 export declare function parseDigestChallenge(wwwAuthenticate: string): DigestChallenge;
@@ -95,17 +129,27 @@ export declare function buildDigestHeader(method: string, url: string, username:
  * @param password  Digest password
  * @param options   Optional method, data, headers, timeout, rejectUnauthorized
  * @returns         DigestResponse (status + headers + data Buffer)
- *
  * @throws Error    If 401 response has no WWW-Authenticate or missing nonce
  * @throws Error    On network-level errors (propagated from axios)
  */
 export declare function digestRequest(url: string, username: string, password: string, options?: DigestRequestOptions): Promise<DigestResponse>;
 /**
  * Convenience wrapper: perform a GET request with Digest auth.
+ *
+ * @param url
+ * @param username
+ * @param password
+ * @param options
  */
 export declare function digestGet(url: string, username: string, password: string, options?: Omit<DigestRequestOptions, "method">): Promise<DigestResponse>;
 /**
  * Convenience wrapper: perform a PUT request with Digest auth.
+ *
+ * @param url
+ * @param username
+ * @param password
+ * @param data
+ * @param options
  */
 export declare function digestPut(url: string, username: string, password: string, data: string | Buffer, options?: Omit<DigestRequestOptions, "method" | "data">): Promise<DigestResponse>;
 //# sourceMappingURL=digest.d.ts.map

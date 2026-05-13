@@ -61,8 +61,17 @@ export declare const CMD_SESSION_ACK: "0xff0d";
  * All fields are strings (URL query params).
  */
 export interface RcpParams {
+    /**
+     *
+     */
     command: string;
+    /**
+     *
+     */
     direction: RcpDirection;
+    /**
+     *
+     */
     type: RcpType;
     /** Hex-encoded payload string, e.g. "0x01" or "00010000". Optional for READ. */
     payload?: string;
@@ -93,6 +102,9 @@ export interface RcpResponse {
 export declare class RcpError extends Error {
     readonly code: string;
     readonly command: string;
+    /**
+     *
+     */
     constructor(code: string, command: string);
 }
 /**
@@ -100,6 +112,9 @@ export declare class RcpError extends Error {
  */
 export declare class RcpNetworkError extends Error {
     readonly status: number | undefined;
+    /**
+     *
+     */
     constructor(status: number | undefined, message: string);
 }
 /**
@@ -137,6 +152,8 @@ export declare function parseRcpResponse(raw: Buffer, command?: string): RcpResp
  * Command 0x0808, direction WRITE, type P_OCTET.
  * Privacy mask payload: 4 bytes, byte[1] carries the mode.
  * Mirrors Python rcp_local_write_privacy() — payload "00010000" / "00000000".
+ *
+ * @param enabled
  */
 export declare function buildSetPrivacyFrame(enabled: boolean): RcpParams;
 /**
@@ -144,6 +161,8 @@ export declare function buildSetPrivacyFrame(enabled: boolean): RcpParams;
  *
  * Command 0x099f, direction WRITE, type P_OCTET.
  * Payload: "0x01" (on) or "0x00" (off).
+ *
+ * @param enabled
  */
 export declare function buildSetLightFrame(enabled: boolean): RcpParams;
 /**
@@ -151,6 +170,8 @@ export declare function buildSetLightFrame(enabled: boolean): RcpParams;
  *
  * Command 0x0810, direction WRITE, type P_OCTET.
  * Payload: "0x01" (rotated) or "0x00" (normal).
+ *
+ * @param rotated180
  */
 export declare function buildSetImageRotationFrame(rotated180: boolean): RcpParams;
 /**
@@ -163,7 +184,13 @@ export declare function buildSetImageRotationFrame(rotated180: boolean): RcpPara
 export declare function buildGetSnapshotFrame(): RcpParams;
 /** Optional Digest auth credentials for LOCAL RCP calls. */
 export interface RcpAuth {
+    /**
+     *
+     */
     user: string;
+    /**
+     *
+     */
     password: string;
 }
 /**

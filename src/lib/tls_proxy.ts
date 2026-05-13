@@ -18,8 +18,8 @@
  * Port of Python tls_proxy.py (Bosch-Smart-Home-Camera-Tool-HomeAssistant).
  */
 
-import * as net from "net";
-import * as tls from "tls";
+import * as net from "node:net";
+import * as tls from "node:tls";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ export interface TlsProxyOptions {
 
 // ── Constants (mirrors Python tls_proxy.py) ───────────────────────────────────
 
-const _MAX_BURST = 5;        // consecutive failures before closing server
+const _MAX_BURST = 5; // consecutive failures before closing server
 const _BURST_WINDOW = 30_000; // ms — window for burst counting
 
 // ── Implementation ────────────────────────────────────────────────────────────
@@ -67,6 +67,8 @@ const _BURST_WINDOW = 30_000; // ms — window for burst counting
  * on localhost. go2rtc / FFmpeg can then connect to rtsp://127.0.0.1:PORT/...
  *
  * Returns a TlsProxyHandle with the chosen port and a stop() method.
+ *
+ * @param options
  */
 export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle> {
     return new Promise((resolve, reject) => {
@@ -106,11 +108,17 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
             // ── Teardown helper — close both ends ───────────────────────────
             let closed = false;
             function teardown(reason: string): void {
-                if (closed) return;
+                if (closed) {
+                    return;
+                }
                 closed = true;
                 log("debug", `TLS proxy ${camLabel}: teardown — ${reason}`);
-                if (!clientSocket.destroyed) clientSocket.destroy();
-                if (!remoteSocket.destroyed) remoteSocket.destroy();
+                if (!clientSocket.destroyed) {
+                    clientSocket.destroy();
+                }
+                if (!remoteSocket.destroyed) {
+                    remoteSocket.destroy();
+                }
                 activeSockets.delete(clientSocket);
                 activeSockets.delete(remoteSocket);
             }
@@ -122,7 +130,7 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
                 log(
                     "debug",
                     `TLS proxy ${camLabel}: connected to ${remoteHost}:${remotePort}` +
-                    ` (${proto ?? "?"}, ${cipher?.name ?? "?"})`,
+                        ` (${proto ?? "?"}, ${cipher?.name ?? "?"})`,
                 );
 
                 // Reset circuit-breaker on successful connect
@@ -140,7 +148,9 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
 
             remoteSocket.on("error", (err: Error) => {
                 const now = Date.now();
-                if (failCount === 0) firstFailAt = now;
+                if (failCount === 0) {
+                    firstFailAt = now;
+                }
                 failCount++;
 
                 log(
@@ -150,13 +160,13 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
                 teardown(`remote error: ${err.message}`);
 
                 // Circuit breaker: too many failures in a short window
-                if (failCount >= _MAX_BURST && (now - firstFailAt) <= _BURST_WINDOW) {
+                if (failCount >= _MAX_BURST && now - firstFailAt <= _BURST_WINDOW) {
                     log(
                         "warn",
                         `TLS proxy ${camLabel}: ${failCount} consecutive connect failures` +
-                        ` in ${Math.round((now - firstFailAt) / 1000)}s —` +
-                        ` closing server socket (camera unreachable).` +
-                        ` Coordinator will rebuild the session when the camera is back.`,
+                            ` in ${Math.round((now - firstFailAt) / 1000)}s —` +
+                            ` closing server socket (camera unreachable).` +
+                            ` Coordinator will rebuild the session when the camera is back.`,
                     );
                     server.close();
                     activeSockets.clear();
@@ -192,7 +202,7 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
             log(
                 "info",
                 `TLS proxy for ${camLabel} started on 127.0.0.1:${port}` +
-                ` -> ${remoteHost}:${remotePort}`,
+                    ` -> ${remoteHost}:${remotePort}`,
             );
 
             // ── stop() implementation ───────────────────────────────────────
@@ -202,7 +212,9 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
 
                     // Destroy all live sockets first
                     for (const sock of activeSockets) {
-                        if (!sock.destroyed) sock.destroy();
+                        if (!sock.destroyed) {
+                            sock.destroy();
+                        }
                     }
                     activeSockets.clear();
 

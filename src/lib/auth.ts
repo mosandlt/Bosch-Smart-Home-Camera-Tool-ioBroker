@@ -29,15 +29,14 @@
  *   HTTP 5xx     → AuthServerOutageError (retry later, do NOT force re-login)
  */
 
-import * as crypto from "crypto";
-import * as https from "https";
+import * as crypto from "node:crypto";
+import * as https from "node:https";
 import axios, { type AxiosInstance } from "axios";
 
 // ── Constants (from Python config_flow.py) ────────────────────────────────────
 
 export const KEYCLOAK_BASE =
-    "https://smarthome.authz.bosch.com" +
-    "/auth/realms/home_auth_provider/protocol/openid-connect";
+    "https://smarthome.authz.bosch.com" + "/auth/realms/home_auth_provider/protocol/openid-connect";
 
 export const CLIENT_ID = "oss_residential_app";
 
@@ -61,17 +60,41 @@ export const CLOUD_API = "https://residential.cbs.boschsecurity.com";
 
 /** Token response from Bosch Keycloak */
 export interface TokenResult {
+    /**
+     *
+     */
     access_token: string;
+    /**
+     *
+     */
     refresh_token: string;
-    expires_in: number;         // seconds until access_token expires (~300)
+    /**
+     *
+     */
+    expires_in: number; // seconds until access_token expires (~300)
+    /**
+     *
+     */
     refresh_expires_in: number; // seconds until refresh_token expires
-    token_type: string;         // "Bearer"
+    /**
+     *
+     */
+    token_type: string; // "Bearer"
+    /**
+     *
+     */
     scope: string;
 }
 
 /** PKCE verifier + challenge pair */
 export interface PkcePair {
+    /**
+     *
+     */
     verifier: string;
+    /**
+     *
+     */
     challenge: string;
 }
 
@@ -82,6 +105,9 @@ export interface PkcePair {
  * Non-recoverable — user must re-authenticate interactively.
  */
 export class RefreshTokenInvalidError extends Error {
+    /**
+     *
+     */
     constructor(message: string) {
         super(message);
         this.name = "RefreshTokenInvalidError";
@@ -93,6 +119,9 @@ export class RefreshTokenInvalidError extends Error {
  * The token is likely still valid — retry after backoff, do NOT prompt re-login.
  */
 export class AuthServerOutageError extends Error {
+    /**
+     *
+     */
     constructor(message: string) {
         super(message);
         this.name = "AuthServerOutageError";
@@ -121,11 +150,11 @@ export function generatePkcePair(): PkcePair {
  */
 export function buildAuthUrl(challenge: string, state: string): string {
     const params = new URLSearchParams({
-        client_id:             CLIENT_ID,
-        response_type:         "code",
-        scope:                 SCOPES,
-        redirect_uri:          REDIRECT_URI,
-        code_challenge:        challenge,
+        client_id: CLIENT_ID,
+        response_type: "code",
+        scope: SCOPES,
+        redirect_uri: REDIRECT_URI,
+        code_challenge: challenge,
         code_challenge_method: "S256",
         state,
     });
@@ -144,7 +173,9 @@ export function extractCode(redirectUrl: string): string | null {
         // Handle both full URLs and bare query strings (user may paste either)
         const urlStr = redirectUrl.trim();
         const hasScheme = urlStr.startsWith("http://") || urlStr.startsWith("https://");
-        const parsed = new URL(hasScheme ? urlStr : `https://placeholder.invalid/?${urlStr.replace(/^[^?]*\?/, "")}`);
+        const parsed = new URL(
+            hasScheme ? urlStr : `https://placeholder.invalid/?${urlStr.replace(/^[^?]*\?/, "")}`,
+        );
         if (parsed.searchParams.get("error")) {
             return null;
         }
@@ -174,11 +205,11 @@ export async function exchangeCode(
 ): Promise<TokenResult | null> {
     try {
         const params = new URLSearchParams({
-            client_id:     CLIENT_ID,
+            client_id: CLIENT_ID,
             client_secret: CLIENT_SECRET,
-            grant_type:    "authorization_code",
+            grant_type: "authorization_code",
             code,
-            redirect_uri:  REDIRECT_URI,
+            redirect_uri: REDIRECT_URI,
             code_verifier: verifier,
         });
         const resp = await httpClient.post<TokenResult>(
@@ -187,12 +218,12 @@ export async function exchangeCode(
             { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
         );
         return {
-            access_token:      resp.data.access_token,
-            refresh_token:     resp.data.refresh_token,
-            expires_in:        resp.data.expires_in,
+            access_token: resp.data.access_token,
+            refresh_token: resp.data.refresh_token,
+            expires_in: resp.data.expires_in,
             refresh_expires_in: resp.data.refresh_expires_in ?? 0,
-            token_type:        resp.data.token_type,
-            scope:             resp.data.scope,
+            token_type: resp.data.token_type,
+            scope: resp.data.scope,
         };
     } catch (err: unknown) {
         if (axios.isAxiosError(err)) {
@@ -200,14 +231,10 @@ export async function exchangeCode(
             if (status !== undefined) {
                 const body = JSON.stringify(err.response?.data ?? "");
                 if (status === 400 || status === 401) {
-                    throw new RefreshTokenInvalidError(
-                        `Keycloak HTTP ${status}: ${body}`,
-                    );
+                    throw new RefreshTokenInvalidError(`Keycloak HTTP ${status}: ${body}`);
                 }
                 if (status >= 500) {
-                    throw new AuthServerOutageError(
-                        `Bosch Keycloak HTTP ${status}`,
-                    );
+                    throw new AuthServerOutageError(`Bosch Keycloak HTTP ${status}`);
                 }
             }
             // Network/timeout error — transient, caller may retry
@@ -234,9 +261,9 @@ export async function refreshAccessToken(
 ): Promise<TokenResult | null> {
     try {
         const params = new URLSearchParams({
-            client_id:     CLIENT_ID,
+            client_id: CLIENT_ID,
             client_secret: CLIENT_SECRET,
-            grant_type:    "refresh_token",
+            grant_type: "refresh_token",
             refresh_token: refreshToken,
         });
         const resp = await httpClient.post<TokenResult>(
@@ -245,12 +272,12 @@ export async function refreshAccessToken(
             { headers: { "Content-Type": "application/x-www-form-urlencoded" } },
         );
         return {
-            access_token:      resp.data.access_token,
-            refresh_token:     resp.data.refresh_token,
-            expires_in:        resp.data.expires_in,
+            access_token: resp.data.access_token,
+            refresh_token: resp.data.refresh_token,
+            expires_in: resp.data.expires_in,
             refresh_expires_in: resp.data.refresh_expires_in ?? 0,
-            token_type:        resp.data.token_type,
-            scope:             resp.data.scope,
+            token_type: resp.data.token_type,
+            scope: resp.data.scope,
         };
     } catch (err: unknown) {
         if (axios.isAxiosError(err)) {
@@ -259,15 +286,11 @@ export async function refreshAccessToken(
                 const body = JSON.stringify(err.response?.data ?? "");
                 // 400/401 → non-recoverable, token is invalid → user must re-login
                 if (status === 400 || status === 401) {
-                    throw new RefreshTokenInvalidError(
-                        `Keycloak HTTP ${status}: ${body}`,
-                    );
+                    throw new RefreshTokenInvalidError(`Keycloak HTTP ${status}: ${body}`);
                 }
                 // 5xx → Bosch server outage → token still valid, retry later
                 if (status >= 500) {
-                    throw new AuthServerOutageError(
-                        `Bosch Keycloak HTTP ${status}`,
-                    );
+                    throw new AuthServerOutageError(`Bosch Keycloak HTTP ${status}`);
                 }
             }
             // Network/timeout error — transient, caller may retry
@@ -298,9 +321,18 @@ export function detectTokenClientId(bearerToken: string): string | null {
         }
         // Pad base64url to a multiple of 4 for Buffer.from
         const padded = parts[1] + "=".repeat((4 - (parts[1].length % 4)) % 4);
-        const payload = JSON.parse(Buffer.from(padded, "base64url").toString("utf-8")) as Record<string, unknown>;
-        const azp = payload["azp"];
-        return azp != null ? String(azp) : null;
+        const payload = JSON.parse(Buffer.from(padded, "base64url").toString("utf-8")) as Record<
+            string,
+            unknown
+        >;
+        const azp = payload.azp;
+        if (typeof azp === "string") {
+            return azp;
+        }
+        if (typeof azp === "number" || typeof azp === "boolean") {
+            return String(azp);
+        }
+        return null;
     } catch {
         return null;
     }

@@ -117,10 +117,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Write a state only if the value changed (iobroker.ring upsertState pattern).
      * Always creates the object if it doesn't exist yet, then sets ack=true.
+     *
+     * @param id
+     * @param value
      */
     async upsertState(id, value) {
-        if (this._stateCache.get(id) === value)
+        if (this._stateCache.get(id) === value) {
             return;
+        }
         this._stateCache.set(id, value);
         await this.setStateAsync(id, value, true);
     }
@@ -248,6 +252,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Create the cameras device + one channel per camera.
      * Uses setObjectNotExistsAsync to preserve user history config.
+     *
+     * @param cameras
      */
     async ensureCameraObjects(cameras) {
         // Top-level "cameras" device
@@ -427,7 +433,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
         }
     }
     // ── Token persistence ───────────────────────────────────────────────────
-    /** Save tokens to ioBroker states (survives adapter restart). */
+    /**
+     * Save tokens to ioBroker states (survives adapter restart).
+     *
+     * @param tokens
+     */
     async saveTokens(tokens) {
         const expiresAt = Date.now() + tokens.expires_in * 1000;
         this._currentAccessToken = tokens.access_token;
@@ -469,38 +479,39 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // Refresh at 75% of token lifetime — leaves a safety buffer before expiry.
         const refreshIn = Math.max(60_000, expiresInMs * 0.75);
         // this.setTimeout returns ioBroker.Timeout | undefined — cast via unknown to normalise
-        this._refreshTimeout = this.setTimeout(async () => {
-            this._refreshTimeout = null;
-            if (!this._currentRefreshToken) {
-                this.log.warn("Token refresh skipped — no refresh token in memory");
-                return;
-            }
-            try {
-                const newTokens = await (0, auth_1.refreshAccessToken)(this._httpClient, this._currentRefreshToken);
-                if (!newTokens) {
-                    // Transient network error — retry in 5 min
-                    this.log.warn("Token refresh returned null (network) — retrying in 5 min");
-                    this.scheduleTokenRefresh(5 * 60_000);
+        this._refreshTimeout =
+            this.setTimeout(async () => {
+                this._refreshTimeout = null;
+                if (!this._currentRefreshToken) {
+                    this.log.warn("Token refresh skipped — no refresh token in memory");
                     return;
                 }
-                await this.saveTokens(newTokens);
-                this.log.debug("Token refresh successful — next refresh in ~" + Math.round(newTokens.expires_in * 0.75 / 60) + " min");
-                this.scheduleTokenRefresh(newTokens.expires_in * 1000);
-            }
-            catch (err) {
-                if (err instanceof auth_1.RefreshTokenInvalidError) {
-                    this.log.error("Refresh token invalid — please reconfigure credentials in Admin UI");
-                    await this.setStateAsync("info.connection", false, true);
-                    // Do NOT re-arm — user must re-configure and restart the adapter
+                try {
+                    const newTokens = await (0, auth_1.refreshAccessToken)(this._httpClient, this._currentRefreshToken);
+                    if (!newTokens) {
+                        // Transient network error — retry in 5 min
+                        this.log.warn("Token refresh returned null (network) — retrying in 5 min");
+                        this.scheduleTokenRefresh(5 * 60_000);
+                        return;
+                    }
+                    await this.saveTokens(newTokens);
+                    this.log.debug(`Token refresh successful — next refresh in ~${Math.round((newTokens.expires_in * 0.75) / 60)} min`);
+                    this.scheduleTokenRefresh(newTokens.expires_in * 1000);
                 }
-                else {
-                    // AuthServerOutageError or unexpected — retry in 5 min
-                    const msg = err instanceof Error ? err.message : String(err);
-                    this.log.warn(`Token refresh failed: ${msg} — retrying in 5 min`);
-                    this.scheduleTokenRefresh(5 * 60_000);
+                catch (err) {
+                    if (err instanceof auth_1.RefreshTokenInvalidError) {
+                        this.log.error("Refresh token invalid — please reconfigure credentials in Admin UI");
+                        await this.setStateAsync("info.connection", false, true);
+                        // Do NOT re-arm — user must re-configure and restart the adapter
+                    }
+                    else {
+                        // AuthServerOutageError or unexpected — retry in 5 min
+                        const msg = err instanceof Error ? err.message : String(err);
+                        this.log.warn(`Token refresh failed: ${msg} — retrying in 5 min`);
+                        this.scheduleTokenRefresh(5 * 60_000);
+                    }
                 }
-            }
-        }, refreshIn) ?? null;
+            }, refreshIn) ?? null;
     }
     // ── Live session management ─────────────────────────────────────────────
     /**
@@ -513,6 +524,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * (REMOTE). We treat it as minimum keepalive time and open a fresh session
      * on every command if the cached one is more than 30 seconds old — a
      * conservative threshold that avoids session-expired errors in practice.
+     *
+     * @param camId
      */
     async ensureLiveSession(camId) {
         const SESSION_TTL_MS = 30_000; // 30 s conservative re-open threshold
@@ -608,7 +621,10 @@ class BoschSmartHomeCamera extends utils.Adapter {
             verifier = existingVerifier;
             challenge = createHash("sha256").update(verifier).digest("base64url");
             const existingState = (await this.getStateAsync("info.pkce_state"))?.val;
-            state = (existingState && existingState.length > 4) ? existingState : randomBytes(16).toString("base64url");
+            state =
+                existingState && existingState.length > 4
+                    ? existingState
+                    : randomBytes(16).toString("base64url");
         }
         else {
             // Generate a fresh PKCE pair
@@ -657,7 +673,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.saveTokens(tokens);
         // Clear paste field so it is not re-used on the next adapter restart
         try {
-            await this.extendForeignObjectAsync(`system.adapter.${this.namespace}`, { native: { redirect_url: "" } });
+            await this.extendForeignObjectAsync(`system.adapter.${this.namespace}`, {
+                native: { redirect_url: "" },
+            });
         }
         catch {
             // Non-fatal — log at debug level; the code has been consumed anyway
@@ -739,8 +757,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 this.log.warn("Camera discovery returned 401 — attempting token refresh before retry");
                 try {
                     const refreshed = await (0, auth_1.refreshAccessToken)(this._httpClient, tokens.refresh_token);
-                    if (!refreshed)
+                    if (!refreshed) {
                         throw new Error("refresh returned null");
+                    }
                     await this.saveTokens(refreshed);
                     cameras = await (0, cameras_1.fetchCameras)(this._httpClient, refreshed.access_token);
                     tokens = refreshed;
@@ -774,11 +793,19 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // ── Step 5: FCM push listener (real implementation v0.3.0) ──────────
         this._fcmListener = new fcm_1.FcmListener(this._httpClient, tokens.access_token);
         // Silent push wake-up — Bosch sends no payload; fetch events from API
-        this._fcmListener.on("push", () => { void this.fetchAndProcessEvents(); });
+        this._fcmListener.on("push", () => {
+            void this.fetchAndProcessEvents();
+        });
         // Typed event fallback — when push contains explicit event-type data
-        this._fcmListener.on("motion", (ev) => { void this.onFcmEvent(ev); });
-        this._fcmListener.on("audio_alarm", (ev) => { void this.onFcmEvent(ev); });
-        this._fcmListener.on("person", (ev) => { void this.onFcmEvent(ev); });
+        this._fcmListener.on("motion", (ev) => {
+            void this.onFcmEvent(ev);
+        });
+        this._fcmListener.on("audio_alarm", (ev) => {
+            void this.onFcmEvent(ev);
+        });
+        this._fcmListener.on("person", (ev) => {
+            void this.onFcmEvent(ev);
+        });
         // Registration success — log token prefix + mark healthy
         this._fcmListener.on("registered", (creds) => {
             this.log.info(`FCM registered: ${creds.fcmToken.substring(0, 12)}...`);
@@ -817,17 +844,22 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * Called whenever a subscribed state changes.
      * Only acts on ack=false states (user commands, not adapter-reported values).
      * Routes writes to the appropriate per-camera handler.
+     *
+     * @param id
+     * @param state
      */
     async onStateChange(id, state) {
-        if (!state || state.ack)
-            return; // ignore null deletions + already-ack'd values
+        if (!state || state.ack) {
+            return;
+        } // ignore null deletions + already-ack'd values
         // id format: <namespace>.cameras.<camId>.<stateName>
         // Strip namespace prefix to get the relative id
-        const ns = this.namespace + ".";
+        const ns = `${this.namespace}.`;
         const relId = id.startsWith(ns) ? id.slice(ns.length) : id;
         const idParts = relId.split(".");
-        if (idParts[0] !== "cameras" || idParts.length < 3)
+        if (idParts[0] !== "cameras" || idParts.length < 3) {
             return;
+        }
         const camId = idParts[1];
         const stateName = idParts.slice(2).join(".");
         this.log.debug(`State change: ${id} = ${state.val} (from user)`);
@@ -880,6 +912,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Handle an FCM motion/person/audio_alarm push event.
      * Writes per-camera last_motion_at + last_motion_event_type states.
+     *
+     * @param ev
      */
     async onFcmEvent(ev) {
         const prefix = `cameras.${ev.cameraId}`;
@@ -901,8 +935,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * Gen2: eventType=MOVEMENT + eventTags=["PERSON"] → normalise to "person"
      */
     async fetchAndProcessEvents() {
-        if (!this._currentAccessToken)
+        if (!this._currentAccessToken) {
             return;
+        }
         const token = this._currentAccessToken;
         const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
         for (const [camId] of this._cameras) {
@@ -917,15 +952,16 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 }
                 const events = resp.data;
                 const newest = events[0];
-                const newestId = (newest["id"] ?? "");
+                const newestId = (newest.id ?? "");
                 const prevId = this._lastSeenEventId[camId] ?? "";
                 // Skip if we've already processed this event (dedup)
-                if (!newestId || newestId === prevId)
+                if (!newestId || newestId === prevId) {
                     continue;
+                }
                 this._lastSeenEventId[camId] = newestId;
                 // Normalise event type — mirrors HA fcm.py PERSON upgrade logic
-                const rawType = (newest["eventType"] ?? "").toUpperCase();
-                const tags = (newest["eventTags"] ?? []);
+                const rawType = (newest.eventType ?? "").toUpperCase();
+                const tags = (newest.eventTags ?? []);
                 let eventType;
                 if (rawType === "MOVEMENT" && tags.includes("PERSON")) {
                     eventType = "person";
@@ -943,8 +979,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     eventType = rawType.toLowerCase() || "motion";
                 }
                 // Timestamp — prefer ISO string, fall back to current time
-                const ts = (newest["timestamp"] ?? newest["createdAt"] ?? "")
-                    || new Date().toISOString();
+                const ts = (newest.timestamp ?? newest.createdAt ?? "") ||
+                    new Date().toISOString();
                 const prefix = `cameras.${camId}`;
                 await this.setStateAsync(`${prefix}.last_motion_at`, ts, true);
                 await this.setStateAsync(`${prefix}.last_motion_event_type`, eventType, true);
@@ -964,6 +1000,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * is the primary (fast ~150ms) and works for both Gen1 + Gen2. RCP+ LOCAL
      * is NOT used here because Bosch's Gen2 firmware rejects WRITE 0x0808 over
      * Digest auth (verified live: HTTP 401 even with correct credentials).
+     *
+     * @param camId
+     * @param enabled
      */
     async handlePrivacyToggle(camId, enabled) {
         if (!this._currentAccessToken) {
@@ -993,6 +1032,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
      *       with body { frontLightOn, wallwasherOn, frontLightIntensity? }
      *
      * Matches HA's `async_cloud_set_camera_light()` in shc.py.
+     *
+     * @param camId
+     * @param enabled
      */
     async handleLightToggle(camId, enabled) {
         if (!this._currentAccessToken) {
@@ -1009,8 +1051,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
             const base = `https://residential.cbs.boschsecurity.com/v11/video_inputs/${camId}/lighting/switch`;
             const body = { enabled };
             const [r1, r2] = await Promise.all([
-                this._httpClient.put(`${base}/front`, body, { headers, validateStatus: () => true }),
-                this._httpClient.put(`${base}/topdown`, body, { headers, validateStatus: () => true }),
+                this._httpClient.put(`${base}/front`, body, {
+                    headers,
+                    validateStatus: () => true,
+                }),
+                this._httpClient.put(`${base}/topdown`, body, {
+                    headers,
+                    validateStatus: () => true,
+                }),
             ]);
             const ok1 = [200, 201, 204].includes(r1.status);
             const ok2 = [200, 201, 204].includes(r2.status);
@@ -1023,7 +1071,10 @@ class BoschSmartHomeCamera extends utils.Adapter {
             const body = enabled
                 ? { frontLightOn: true, wallwasherOn: true, frontLightIntensity: 1.0 }
                 : { frontLightOn: false, wallwasherOn: false };
-            const resp = await this._httpClient.put(url, body, { headers, validateStatus: () => true });
+            const resp = await this._httpClient.put(url, body, {
+                headers,
+                validateStatus: () => true,
+            });
             if (![200, 201, 204].includes(resp.status)) {
                 throw new Error(`Cloud light PUT Gen1 returned HTTP ${resp.status}`);
             }
@@ -1041,7 +1092,13 @@ class BoschSmartHomeCamera extends utils.Adapter {
      *
      * The flag is stored in-memory (_imageRotation) so downstream callers (snapshot
      * post-processing, UI consumers reading the state) can apply 180° transforms.
+     *
+     * @param camId
+     * @param rotated180
      */
+    // Kept async to match the sibling toggle handlers (handlePrivacyToggle, handleLightToggle)
+    // — the dispatcher in onStateChange awaits all of them uniformly.
+    // eslint-disable-next-line @typescript-eslint/require-await
     async handleImageRotationToggle(camId, rotated180) {
         this._imageRotation[camId] = rotated180;
         this.log.info(`Image rotation ${rotated180 ? "180°" : "0°"} set for camera ${camId.slice(0, 8)}`);
@@ -1055,6 +1112,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * Outdoor (Terrasse, FW 9.40.25). The second attempt (within ~5s) always
      * succeeds. We retry once with a short backoff before giving up; mirrors
      * HA integration's snap.jpg retry pattern.
+     *
+     * @param camId
      */
     async handleSnapshotTrigger(camId) {
         const session = await this.ensureLiveSession(camId);
@@ -1095,11 +1154,15 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * is whether snapshot fetches succeed. We mark a camera offline only after
      * {@link BoschSmartHomeCamera.OFFLINE_THRESHOLD} consecutive failures —
      * a single transient "stream has been aborted" must not flip the state.
+     *
+     * @param camId
+     * @param reachable
      */
     async markCameraReachability(camId, reachable) {
         if (reachable) {
-            if (this._snapshotFailCount.get(camId))
+            if (this._snapshotFailCount.get(camId)) {
                 this._snapshotFailCount.delete(camId);
+            }
             await this.setStateAsync(`cameras.${camId}.online`, true, true);
             return;
         }
@@ -1113,6 +1176,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * Called when the adapter is stopped.
      * Cleans up TLS proxies, FCM listener, live sessions, and the refresh timer.
      * Must always call callback() — ioBroker enforces a timeout.
+     *
+     * @param callback
      */
     onUnload(callback) {
         void (async () => {
@@ -1127,7 +1192,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     try {
                         await this._fcmListener.stop();
                     }
-                    catch { /* best-effort */ }
+                    catch {
+                        /* best-effort */
+                    }
                     this._fcmListener = null;
                 }
                 // Stop all TLS proxies
@@ -1135,7 +1202,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     try {
                         await handle.stop();
                     }
-                    catch { /* best-effort */ }
+                    catch {
+                        /* best-effort */
+                    }
                 }
                 this._tlsProxies.clear();
                 // Close all live sessions (best-effort — camera may be gone)
@@ -1145,7 +1214,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
                         try {
                             await (0, live_session_1.closeLiveSession)(this._httpClient, token, camId);
                         }
-                        catch { /* best-effort */ }
+                        catch {
+                            /* best-effort */
+                        }
                     }
                 }
                 this._liveSessions.clear();

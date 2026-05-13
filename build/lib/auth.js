@@ -74,13 +74,12 @@ exports.exchangeCode = exchangeCode;
 exports.refreshAccessToken = refreshAccessToken;
 exports.detectTokenClientId = detectTokenClientId;
 exports.createHttpClient = createHttpClient;
-const crypto = __importStar(require("crypto"));
+const crypto = __importStar(require("node:crypto"));
 exports.crypto = crypto;
-const https = __importStar(require("https"));
+const https = __importStar(require("node:https"));
 const axios_1 = __importDefault(require("axios"));
 // ── Constants (from Python config_flow.py) ────────────────────────────────────
-exports.KEYCLOAK_BASE = "https://smarthome.authz.bosch.com" +
-    "/auth/realms/home_auth_provider/protocol/openid-connect";
+exports.KEYCLOAK_BASE = "https://smarthome.authz.bosch.com" + "/auth/realms/home_auth_provider/protocol/openid-connect";
 exports.CLIENT_ID = "oss_residential_app";
 /** Decoded from base64 — same value as Python config_flow.py CLIENT_SECRET */
 exports.CLIENT_SECRET = Buffer.from("RjFqWnpzRzVOdHc3eDJWVmM4SjZxZ3NuaXNNT2ZhWmc=", "base64").toString("utf-8");
@@ -97,6 +96,9 @@ exports.CLOUD_API = "https://residential.cbs.boschsecurity.com";
  * Non-recoverable — user must re-authenticate interactively.
  */
 class RefreshTokenInvalidError extends Error {
+    /**
+     *
+     */
     constructor(message) {
         super(message);
         this.name = "RefreshTokenInvalidError";
@@ -108,6 +110,9 @@ exports.RefreshTokenInvalidError = RefreshTokenInvalidError;
  * The token is likely still valid — retry after backoff, do NOT prompt re-login.
  */
 class AuthServerOutageError extends Error {
+    /**
+     *
+     */
     constructor(message) {
         super(message);
         this.name = "AuthServerOutageError";
@@ -287,8 +292,14 @@ function detectTokenClientId(bearerToken) {
         // Pad base64url to a multiple of 4 for Buffer.from
         const padded = parts[1] + "=".repeat((4 - (parts[1].length % 4)) % 4);
         const payload = JSON.parse(Buffer.from(padded, "base64url").toString("utf-8"));
-        const azp = payload["azp"];
-        return azp != null ? String(azp) : null;
+        const azp = payload.azp;
+        if (typeof azp === "string") {
+            return azp;
+        }
+        if (typeof azp === "number" || typeof azp === "boolean") {
+            return String(azp);
+        }
+        return null;
     }
     catch {
         return null;

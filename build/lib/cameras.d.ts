@@ -64,6 +64,8 @@ export declare class CamerasApiError extends Error {
  * Gen1 values: INDOOR, CAMERA_360, OUTDOOR, CAMERA_EYES, and all unknown strings
  *
  * Mirrors the MODELS registry in HA models.py.
+ *
+ * @param hardwareVersion
  */
 export declare function detectGeneration(hardwareVersion: string): 1 | 2;
 /**

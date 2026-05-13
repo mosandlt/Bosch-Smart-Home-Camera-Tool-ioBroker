@@ -83,6 +83,9 @@ exports.CMD_SESSION_ACK = "0xff0d";
 class RcpError extends Error {
     code;
     command;
+    /**
+     *
+     */
     constructor(code, command) {
         super(`RCP error ${code} for command ${command}`);
         this.code = code;
@@ -96,6 +99,9 @@ exports.RcpError = RcpError;
  */
 class RcpNetworkError extends Error {
     status;
+    /**
+     *
+     */
     constructor(status, message) {
         super(message);
         this.status = status;
@@ -171,6 +177,8 @@ function parseRcpResponse(raw, command = "unknown") {
  * Command 0x0808, direction WRITE, type P_OCTET.
  * Privacy mask payload: 4 bytes, byte[1] carries the mode.
  * Mirrors Python rcp_local_write_privacy() — payload "00010000" / "00000000".
+ *
+ * @param enabled
  */
 function buildSetPrivacyFrame(enabled) {
     const payload = enabled ? "00010000" : "00000000";
@@ -181,6 +189,8 @@ function buildSetPrivacyFrame(enabled) {
  *
  * Command 0x099f, direction WRITE, type P_OCTET.
  * Payload: "0x01" (on) or "0x00" (off).
+ *
+ * @param enabled
  */
 function buildSetLightFrame(enabled) {
     const payload = enabled ? "01" : "00";
@@ -191,6 +201,8 @@ function buildSetLightFrame(enabled) {
  *
  * Command 0x0810, direction WRITE, type P_OCTET.
  * Payload: "0x01" (rotated) or "0x00" (normal).
+ *
+ * @param rotated180
  */
 function buildSetImageRotationFrame(rotated180) {
     const payload = rotated180 ? "01" : "00";
@@ -231,8 +243,9 @@ async function sendRcpCommand(httpClient, baseUrl, params, timeoutMs = 5000, aut
     // Build query string from params (RCP+ uses URL-encoded GET parameters)
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined && v !== null)
+        if (v !== undefined && v !== null) {
             qs.append(k, String(v));
+        }
     }
     const fullUrl = `${baseUrl}?${qs.toString()}`;
     try {
@@ -254,14 +267,13 @@ async function sendRcpCommand(httpClient, baseUrl, params, timeoutMs = 5000, aut
             responseType: "arraybuffer",
             timeout: timeoutMs,
         });
-        const raw = Buffer.isBuffer(resp.data)
-            ? resp.data
-            : Buffer.from(resp.data);
+        const raw = Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data);
         return parseRcpResponse(raw, params.command);
     }
     catch (err) {
-        if (err instanceof RcpNetworkError)
+        if (err instanceof RcpNetworkError) {
             throw err;
+        }
         if (axios_1.default.isAxiosError(err)) {
             const status = err.response?.status;
             throw new RcpNetworkError(status, `RCP HTTP ${status ?? "network error"} for command ${params.command}: ${err.message}`);

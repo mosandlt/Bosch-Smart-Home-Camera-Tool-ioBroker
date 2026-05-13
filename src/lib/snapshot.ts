@@ -12,7 +12,7 @@
  */
 
 import axios from "axios";
-import * as https from "https";
+import * as https from "node:https";
 import { digestRequest } from "./digest";
 
 // ── Error class ────────────────────────────────────────────────────────────────
@@ -27,6 +27,9 @@ import { digestRequest } from "./digest";
 export class SnapshotError extends Error {
     public readonly cause?: unknown;
 
+    /**
+     *
+     */
     constructor(message: string, cause?: unknown) {
         super(message);
         this.name = "SnapshotError";
@@ -80,6 +83,7 @@ export function buildSnapshotUrl(proxyUrl: string, jpegSize: number = 1206): str
  * @param connectionType  "LOCAL" → Digest auth; "REMOTE" → plain GET
  * @param user            Digest username (cbs-<USERNAME> for LOCAL; ignored for REMOTE)
  * @param password        Digest password (for LOCAL; ignored for REMOTE)
+ * @param options
  * @param options.timeout Request timeout in ms (default 6000 — matches HA's 6 s cap)
  * @returns               JPEG image bytes as Buffer
  * @throws SnapshotError  On non-200 status / non-image content-type / empty body / network error
@@ -103,23 +107,16 @@ export async function fetchSnapshot(
                 rejectUnauthorized: false,
             });
         } catch (err: unknown) {
-            throw new SnapshotError(
-                `LOCAL snapshot network error: ${(err as Error).message}`,
-                err,
-            );
+            throw new SnapshotError(`LOCAL snapshot network error: ${(err as Error).message}`, err);
         }
 
         if (resp.status !== 200) {
-            throw new SnapshotError(
-                `LOCAL snapshot returned HTTP ${resp.status} for ${proxyUrl}`,
-            );
+            throw new SnapshotError(`LOCAL snapshot returned HTTP ${resp.status} for ${proxyUrl}`);
         }
 
         const ct = (resp.headers["content-type"] as string | undefined) ?? "";
         if (!ct.includes("image")) {
-            throw new SnapshotError(
-                `LOCAL snapshot returned non-image Content-Type: "${ct}"`,
-            );
+            throw new SnapshotError(`LOCAL snapshot returned non-image Content-Type: "${ct}"`);
         }
 
         if (!resp.data || resp.data.length === 0) {
@@ -146,16 +143,11 @@ export async function fetchSnapshot(
         contentType = (result.headers["content-type"] as string | undefined) ?? "";
         data = Buffer.from(result.data);
     } catch (err: unknown) {
-        throw new SnapshotError(
-            `REMOTE snapshot network error: ${(err as Error).message}`,
-            err,
-        );
+        throw new SnapshotError(`REMOTE snapshot network error: ${(err as Error).message}`, err);
     }
 
     if (status !== 200) {
-        throw new SnapshotError(
-            `REMOTE snapshot returned HTTP ${status} for ${proxyUrl}`,
-        );
+        throw new SnapshotError(`REMOTE snapshot returned HTTP ${status} for ${proxyUrl}`);
     }
 
     if (!contentType.includes("image")) {

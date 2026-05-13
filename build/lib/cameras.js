@@ -74,6 +74,8 @@ const GEN2_HARDWARE_VERSIONS = new Set([
  * Gen1 values: INDOOR, CAMERA_360, OUTDOOR, CAMERA_EYES, and all unknown strings
  *
  * Mirrors the MODELS registry in HA models.py.
+ *
+ * @param hardwareVersion
  */
 function detectGeneration(hardwareVersion) {
     return GEN2_HARDWARE_VERSIONS.has(hardwareVersion) ? 2 : 1;
@@ -83,6 +85,8 @@ function detectGeneration(hardwareVersion) {
  * Map a raw API camera object to a typed BoschCamera.
  * Returns null if the required `id` field is missing or empty.
  * Missing name/hardwareVersion/firmwareVersion fields get safe defaults.
+ *
+ * @param raw
  */
 function mapCamera(raw) {
     const id = typeof raw.id === "string" ? raw.id.trim() : "";

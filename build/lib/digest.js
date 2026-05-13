@@ -63,13 +63,15 @@ exports.buildDigestHeader = buildDigestHeader;
 exports.digestRequest = digestRequest;
 exports.digestGet = digestGet;
 exports.digestPut = digestPut;
-const crypto = __importStar(require("crypto"));
-const https = __importStar(require("https"));
+const crypto = __importStar(require("node:crypto"));
+const https = __importStar(require("node:https"));
 const axios_1 = __importDefault(require("axios"));
 // ── Internal helpers ──────────────────────────────────────────────────────────
 /**
  * Compute MD5 hex digest of a UTF-8 string.
  * Mirrors Python _md5() in auth_utils.py.
+ *
+ * @param input
  */
 function md5(input) {
     return crypto.createHash("md5").update(input, "utf-8").digest("hex");
@@ -77,6 +79,8 @@ function md5(input) {
 /**
  * Compute SHA-256 hex digest of a UTF-8 string.
  * Mirrors Python _sha256() in auth_utils.py.
+ *
+ * @param input
  */
 function sha256(input) {
     return crypto.createHash("sha256").update(input, "utf-8").digest("hex");
@@ -84,17 +88,21 @@ function sha256(input) {
 /**
  * Select the hash function based on the Digest algorithm directive.
  * Defaults to MD5 if algorithm is absent or unrecognized.
+ *
+ * @param algorithm
  */
 function selectHashFn(algorithm) {
     const alg = (algorithm ?? "MD5").toUpperCase();
-    if (alg.startsWith("SHA-256"))
+    if (alg.startsWith("SHA-256")) {
         return sha256;
+    }
     return md5;
 }
 /**
  * Parse the WWW-Authenticate: Digest header into a DigestChallenge object.
  * Mirrors Python _parse_digest_challenge() in auth_utils.py.
  *
+ * @param wwwAuthenticate
  * @throws Error if the header is not a Digest challenge or missing `nonce`
  */
 function parseDigestChallenge(wwwAuthenticate) {
@@ -112,15 +120,15 @@ function parseDigestChallenge(wwwAuthenticate) {
         const value = match[2] !== undefined ? match[2] : match[3];
         params[key] = value;
     }
-    if (!params["nonce"]) {
+    if (!params.nonce) {
         throw new Error("Digest challenge missing required 'nonce' directive");
     }
     return {
-        realm: params["realm"] ?? "",
-        nonce: params["nonce"],
-        opaque: params["opaque"],
-        qop: params["qop"],
-        algorithm: params["algorithm"],
+        realm: params.realm ?? "",
+        nonce: params.nonce,
+        opaque: params.opaque,
+        qop: params.qop,
+        algorithm: params.algorithm,
     };
 }
 /**
@@ -183,7 +191,7 @@ function buildDigestHeader(method, url, username, password, challenge) {
     if (opaque) {
         parts.push(`opaque="${opaque}"`);
     }
-    return "Digest " + parts.join(", ");
+    return `Digest ${parts.join(", ")}`;
 }
 // ── Public API ────────────────────────────────────────────────────────────────
 /**
@@ -214,7 +222,6 @@ function buildDigestHeader(method, url, username, password, challenge) {
  * @param password  Digest password
  * @param options   Optional method, data, headers, timeout, rejectUnauthorized
  * @returns         DigestResponse (status + headers + data Buffer)
- *
  * @throws Error    If 401 response has no WWW-Authenticate or missing nonce
  * @throws Error    On network-level errors (propagated from axios)
  */
@@ -266,12 +273,23 @@ async function digestRequest(url, username, password, options = {}) {
 }
 /**
  * Convenience wrapper: perform a GET request with Digest auth.
+ *
+ * @param url
+ * @param username
+ * @param password
+ * @param options
  */
 async function digestGet(url, username, password, options) {
     return digestRequest(url, username, password, { ...options, method: "GET" });
 }
 /**
  * Convenience wrapper: perform a PUT request with Digest auth.
+ *
+ * @param url
+ * @param username
+ * @param password
+ * @param data
+ * @param options
  */
 async function digestPut(url, username, password, data, options) {
     return digestRequest(url, username, password, {

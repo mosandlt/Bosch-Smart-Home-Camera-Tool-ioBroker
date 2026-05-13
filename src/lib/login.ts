@@ -51,19 +51,17 @@ import axios, { type AxiosInstance } from "axios";
 import { CookieJar } from "tough-cookie";
 import { wrapper } from "axios-cookiejar-support";
 
-import {
-    generatePkcePair,
-    buildAuthUrl,
-    exchangeCode,
-    type TokenResult,
-} from "./auth";
+import { generatePkcePair, buildAuthUrl, exchangeCode, type TokenResult } from "./auth";
 
-import * as crypto from "crypto";
+import * as crypto from "node:crypto";
 
 // ── Error classes ─────────────────────────────────────────────────────────────
 
 /** Thrown when SingleKey ID rejects username or password. */
 export class InvalidCredentialsError extends Error {
+    /**
+     *
+     */
     constructor(message = "Invalid credentials") {
         super(message);
         this.name = "InvalidCredentialsError";
@@ -77,6 +75,9 @@ export class InvalidCredentialsError extends Error {
  * - Additional account verification
  */
 export class MfaRequiredError extends Error {
+    /**
+     *
+     */
     constructor(message = "MFA or additional verification required") {
         super(message);
         this.name = "MfaRequiredError";
@@ -85,6 +86,9 @@ export class MfaRequiredError extends Error {
 
 /** Thrown when the login flow fails for non-credential reasons (5xx, network, parsing errors). */
 export class LoginFlowError extends Error {
+    /**
+     *
+     */
     constructor(message: string) {
         super(message);
         this.name = "LoginFlowError";
@@ -154,7 +158,9 @@ export function extractCodeFromLocation(location: string): string | null {
     try {
         const url = location.startsWith("http")
             ? new URL(location)
-            : new URL(`https://placeholder.invalid${location.startsWith("/") ? "" : "/"}${location}`);
+            : new URL(
+                  `https://placeholder.invalid${location.startsWith("/") ? "" : "/"}${location}`,
+              );
         if (url.searchParams.get("error")) {
             return null;
         }
@@ -167,6 +173,8 @@ export function extractCodeFromLocation(location: string): string | null {
 /**
  * Detect hCaptcha / reCAPTCHA on a page.
  * SingleKey ID uses hCaptcha (sitekey f8fe2d56-...) on the email submit button.
+ *
+ * @param html
  */
 export function detectCaptcha(html: string): boolean {
     return /h-captcha|recaptcha|g-recaptcha|data-sitekey/i.test(html);
@@ -174,16 +182,25 @@ export function detectCaptcha(html: string): boolean {
 
 /**
  * Detect MFA / 2FA challenge page.
+ *
+ * @param html
  */
 export function detectMfa(html: string): boolean {
-    return /enter (verification|authentication) code|two-factor|authenticator app|verify your identity/i.test(html);
+    return /enter (verification|authentication) code|two-factor|authenticator app|verify your identity/i.test(
+        html,
+    );
 }
 
 // Keep the old extractFormAction export for backward-compatibility with existing tests
 // (tests that stub a Keycloak-style form with explicit action= still pass).
+/**
+ *
+ */
 export function extractFormAction(html: string): string | null {
     const match = html.match(/<form[^>]+action="([^"]+)"/i);
-    if (!match) return null;
+    if (!match) {
+        return null;
+    }
     return match[1]
         .replace(/&amp;/g, "&")
         .replace(/&lt;/g, "<")
@@ -225,16 +242,18 @@ export async function loginWithCredentials(
     // Cookie jar: persists .AspNetCore.Antiforgery + SKI_session cookies
     // across all redirect hops on singlekey-id.com.
     const jar = new CookieJar();
-    const jarClient = wrapper(axios.create({
-        timeout: httpClient.defaults.timeout ?? 15_000,
-        headers: {
-            "User-Agent": "iobroker.bosch-smart-home-camera/0.2.0",
-        },
-        httpsAgent: httpClient.defaults.httpsAgent,
-        jar,
-        withCredentials: true,
-        maxRedirects: 15,  // Bosch auth chain has 7+ hops
-    }));
+    const jarClient = wrapper(
+        axios.create({
+            timeout: httpClient.defaults.timeout ?? 15_000,
+            headers: {
+                "User-Agent": "iobroker.bosch-smart-home-camera/0.2.0",
+            },
+            httpsAgent: httpClient.defaults.httpsAgent,
+            jar,
+            withCredentials: true,
+            maxRedirects: 15, // Bosch auth chain has 7+ hops
+        }),
+    );
 
     // ── Step 2: GET email page ───────────────────────────────────────────────
     let emailPageUrl: string;
@@ -249,11 +268,14 @@ export async function loginWithCredentials(
             throw new LoginFlowError(`Auth server error HTTP ${emailPageResp.status}`);
         }
         // After following redirects, request.res.responseUrl is the final URL
-        emailPageUrl = (emailPageResp.request as { res?: { responseUrl?: string } })
-            ?.res?.responseUrl ?? authUrl;
-        emailHtml = emailPageResp.data as string;
+        emailPageUrl =
+            (emailPageResp.request as { res?: { responseUrl?: string } })?.res?.responseUrl ??
+            authUrl;
+        emailHtml = emailPageResp.data;
     } catch (err: unknown) {
-        if (err instanceof LoginFlowError) throw err;
+        if (err instanceof LoginFlowError) {
+            throw err;
+        }
         if (axios.isAxiosError(err)) {
             const status = err.response?.status;
             if (status === 400) {
@@ -284,9 +306,9 @@ export async function loginWithCredentials(
 
     const emailBody = new URLSearchParams({
         "UserIdentifierInput.EmailInput.StringValue": username,
-        "__RequestVerificationToken": emailForm.csrf,
-        "credential": "",
-        "returnPath": returnPath,
+        __RequestVerificationToken: emailForm.csrf,
+        credential: "",
+        returnPath: returnPath,
     });
 
     let passwordPageUrl: string;
@@ -299,7 +321,7 @@ export async function loginWithCredentials(
             {
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
                 responseType: "text",
             },
@@ -312,11 +334,14 @@ export async function loginWithCredentials(
             throw new LoginFlowError(`Email POST rejected HTTP ${passwordPageResp.status}`);
         }
 
-        passwordPageUrl = (passwordPageResp.request as { res?: { responseUrl?: string } })
-            ?.res?.responseUrl ?? emailForm.action;
-        passwordHtml = passwordPageResp.data as string;
+        passwordPageUrl =
+            (passwordPageResp.request as { res?: { responseUrl?: string } })?.res?.responseUrl ??
+            emailForm.action;
+        passwordHtml = passwordPageResp.data;
     } catch (err: unknown) {
-        if (err instanceof LoginFlowError) throw err;
+        if (err instanceof LoginFlowError) {
+            throw err;
+        }
         if (axios.isAxiosError(err)) {
             const status = err.response?.status;
             if (status !== undefined && status >= 500) {
@@ -333,7 +358,8 @@ export async function loginWithCredentials(
     //   (a) h-captcha-response is missing/invalid (most common headless case)
     //   (b) The email address is not registered
     // We can distinguish by checking whether the email was pre-filled in the response.
-    const isStillOnEmailPage = !passwordHtml.includes("PasswordInput") &&
+    const isStillOnEmailPage =
+        !passwordHtml.includes("PasswordInput") &&
         (passwordPageUrl.includes("/login") || passwordPageUrl.includes("/en-gb/login"));
 
     if (isStillOnEmailPage) {
@@ -342,7 +368,7 @@ export async function loginWithCredentials(
         if (emailPreFilled && detectCaptcha(passwordHtml)) {
             throw new MfaRequiredError(
                 "hCaptcha required on email page — headless programmatic login is blocked by " +
-                "singlekey-id.com. Use the browser-based login URL in the ioBroker Admin UI.",
+                    "singlekey-id.com. Use the browser-based login URL in the ioBroker Admin UI.",
             );
         }
         // Email not pre-filled → email was rejected (not registered or invalid)
@@ -376,9 +402,9 @@ export async function loginWithCredentials(
     // (matches SingleKey ID naming convention: UserIdentifierInput.EmailInput.StringValue)
     const passwordBody = new URLSearchParams({
         "Password.PasswordInput.StringValue": password,
-        "__RequestVerificationToken": passwordForm.csrf,
-        "credential": "",
-        "returnPath": pwdReturnPath,
+        __RequestVerificationToken: passwordForm.csrf,
+        credential: "",
+        returnPath: pwdReturnPath,
     });
 
     let finalUrl: string;
@@ -390,7 +416,7 @@ export async function loginWithCredentials(
             {
                 headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 },
                 responseType: "text",
                 // Follow redirects: Bosch OIDC callback chain after successful password
@@ -398,10 +424,11 @@ export async function loginWithCredentials(
             },
         );
 
-        finalUrl = (submitResp.request as { res?: { responseUrl?: string } })
-            ?.res?.responseUrl ?? passwordForm.action;
+        finalUrl =
+            (submitResp.request as { res?: { responseUrl?: string } })?.res?.responseUrl ??
+            passwordForm.action;
 
-        const submitHtml = (submitResp.data as string) ?? "";
+        const submitHtml = submitResp.data ?? "";
 
         // 200 with password form → wrong password
         if (submitResp.status === 200 && submitHtml.includes("PasswordInput")) {
@@ -412,13 +439,17 @@ export async function loginWithCredentials(
             throw new LoginFlowError(`Password POST HTTP ${submitResp.status}`);
         }
     } catch (err: unknown) {
-        if (err instanceof InvalidCredentialsError || err instanceof LoginFlowError) throw err;
+        if (err instanceof InvalidCredentialsError || err instanceof LoginFlowError) {
+            throw err;
+        }
         if (axios.isAxiosError(err)) {
             const status = err.response?.status;
             if (status !== undefined && status >= 500) {
                 throw new LoginFlowError(`Password POST HTTP ${status}`);
             }
-            throw new LoginFlowError(`Network error during password POST: ${(err as Error).message}`);
+            throw new LoginFlowError(
+                `Network error during password POST: ${(err as Error).message}`,
+            );
         }
         throw new LoginFlowError(`Unexpected error during password POST: ${String(err)}`);
     }
@@ -428,7 +459,9 @@ export async function loginWithCredentials(
     if (!code) {
         // Could be MFA redirect or other interactive step
         if (/mfa|two-factor|2fa|otp/i.test(finalUrl)) {
-            throw new MfaRequiredError(`MFA redirect after password: ${finalUrl.substring(0, 120)}`);
+            throw new MfaRequiredError(
+                `MFA redirect after password: ${finalUrl.substring(0, 120)}`,
+            );
         }
         throw new LoginFlowError(`No auth code in final URL: ${finalUrl.substring(0, 200)}`);
     }

@@ -39,7 +39,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FcmListener = exports.FcmRegistrationError = exports.FcmCbsRegistrationError = exports.FCM_ANDROID_APP_ID = exports.FCM_IOS_APP_ID = exports.FCM_SENDER_ID = exports.CLOUD_API = void 0;
-const events_1 = require("events");
+const node_events_1 = require("node:events");
 const fcm_1 = require("@aracna/fcm");
 // ── Constants (from Python fcm.py) ───────────────────────────────────────────
 exports.CLOUD_API = "https://residential.cbs.boschsecurity.com";
@@ -61,6 +61,9 @@ const FCM_VAPID_KEY = "BDOU99-h67HcA6JeFXHbSNMu7e2yNNu3RzoMj8TM4W88jITfq7ZmPvIM1
  */
 class FcmCbsRegistrationError extends Error {
     httpStatus;
+    /**
+     *
+     */
     constructor(httpStatus, message) {
         super(message);
         this.httpStatus = httpStatus;
@@ -73,6 +76,9 @@ exports.FcmCbsRegistrationError = FcmCbsRegistrationError;
  */
 class FcmRegistrationError extends Error {
     cause;
+    /**
+     *
+     */
     constructor(message, cause) {
         super(message);
         this.cause = cause;
@@ -87,7 +93,10 @@ const DEFAULT_DEPS = {
     generateFcmAuthSecret: fcm_1.generateFcmAuthSecret,
     FcmClient: fcm_1.FcmClient,
 };
-class FcmListener extends events_1.EventEmitter {
+/**
+ *
+ */
+class FcmListener extends node_events_1.EventEmitter {
     _httpClient;
     _bearerToken;
     _options;
@@ -96,6 +105,9 @@ class FcmListener extends events_1.EventEmitter {
     _fcmToken = null;
     _running = false;
     _clientHandle = null;
+    /**
+     *
+     */
     constructor(httpClient, bearerToken, options, deps) {
         super();
         this._httpClient = httpClient;
@@ -112,7 +124,7 @@ class FcmListener extends events_1.EventEmitter {
      * Step 3: Register the FCM token with Bosch CBS (POST /v11/devices).
      * Step 4: Start FcmClient TLS socket → emit "push" on every incoming message.
      *
-     * @emits "registered" with FcmCredentials once FCM + CBS registration complete.
+     * @fires "registered" with FcmCredentials once FCM + CBS registration complete.
      * @throws FcmRegistrationError   if Google FCM registration fails.
      * @throws FcmCbsRegistrationError if Bosch CBS rejects the token (HTTP 4xx).
      */
@@ -124,8 +136,9 @@ class FcmListener extends events_1.EventEmitter {
         if (mode === "auto") {
             // Try iOS first, then Android — mirrors Python _try_fcm_with_mode logic
             const iosOk = await this._tryStart("ios");
-            if (iosOk)
+            if (iosOk) {
                 return;
+            }
             const androidOk = await this._tryStart("android");
             if (!androidOk) {
                 throw new FcmRegistrationError("FCM: both iOS and Android registration failed — check network and Firebase credentials");
@@ -141,7 +154,8 @@ class FcmListener extends events_1.EventEmitter {
     /**
      * Stop the listener cleanly. Closes the MTalk TLS socket and sets state to
      * stopped. Safe to call multiple times (idempotent).
-     * @emits "disconnect"
+     *
+     * @fires "disconnect"
      */
     async stop() {
         if (!this._running) {
@@ -177,6 +191,8 @@ class FcmListener extends events_1.EventEmitter {
     /**
      * Attempt FCM registration + CBS registration + client start for a single mode.
      * Returns true on success, false on any error (caller logs and falls back).
+     *
+     * @param mode
      */
     async _tryStart(mode) {
         const deps = this._deps;
@@ -272,7 +288,7 @@ class FcmListener extends events_1.EventEmitter {
             this._running = true;
             return true;
         }
-        catch (err) {
+        catch {
             // Do not emit "error" here — _tryStart is internal. The caller
             // (start()) will emit "error" or throw FcmRegistrationError once all
             // modes have been tried. Emitting "error" from _tryStart without a
@@ -287,6 +303,8 @@ class FcmListener extends events_1.EventEmitter {
      * HTTP 204 → success. HTTP 500 + "sh:internal.error" → already registered
      * (treat as success, same as Python register_fcm_with_bosch()).
      *
+     * @param token
+     * @param mode
      * @throws FcmCbsRegistrationError on non-retryable HTTP 4xx.
      */
     async _registerWithCbs(token, mode) {
@@ -325,6 +343,8 @@ class FcmListener extends events_1.EventEmitter {
      * If the data dict contains event type info, also parses and emits the typed event.
      *
      * Mirrors Python _on_fcm_push() + async_handle_fcm_push() flow.
+     *
+     * @param data
      */
     _onPush(data) {
         // Emit raw push so coordinator can trigger event fetch
@@ -345,17 +365,18 @@ class FcmListener extends events_1.EventEmitter {
      *   - eventType=MOVEMENT                        → eventType="motion"
      *   - eventType=AUDIO_ALARM                     → eventType="audio_alarm"
      *
+     * @param raw
      * @returns Parsed payload, or null if the event type is not recognised.
      */
     _parseNotification(raw) {
-        const cameraId = (raw["camera_id"] ?? raw["cameraId"] ?? "");
-        const cameraName = (raw["camera_name"] ?? raw["cameraName"] ?? "");
-        const timestamp = (raw["timestamp"] ?? "");
-        const imageUrl = (raw["image_url"] ?? raw["imageUrl"] ?? "");
-        const eventId = (raw["event_id"] ?? raw["eventId"] ?? "");
+        const cameraId = (raw.camera_id ?? raw.cameraId ?? "");
+        const cameraName = (raw.camera_name ?? raw.cameraName ?? "");
+        const timestamp = (raw.timestamp ?? "");
+        const imageUrl = (raw.image_url ?? raw.imageUrl ?? "");
+        const eventId = (raw.event_id ?? raw.eventId ?? "");
         // Normalise raw Bosch event type (matches Python fcm.py PERSON upgrade logic)
-        const rawType = (raw["event_type"] ?? raw["eventType"] ?? "").toUpperCase();
-        const tags = (raw["event_tags"] ?? raw["eventTags"] ?? []);
+        const rawType = (raw.event_type ?? raw.eventType ?? "").toUpperCase();
+        const tags = (raw.event_tags ?? raw.eventTags ?? []);
         let eventType;
         if (rawType === "MOVEMENT" && tags.includes("PERSON")) {
             eventType = "person";

@@ -52,7 +52,7 @@ exports.SnapshotError = void 0;
 exports.buildSnapshotUrl = buildSnapshotUrl;
 exports.fetchSnapshot = fetchSnapshot;
 const axios_1 = __importDefault(require("axios"));
-const https = __importStar(require("https"));
+const https = __importStar(require("node:https"));
 const digest_1 = require("./digest");
 // ── Error class ────────────────────────────────────────────────────────────────
 /**
@@ -64,6 +64,9 @@ const digest_1 = require("./digest");
  */
 class SnapshotError extends Error {
     cause;
+    /**
+     *
+     */
     constructor(message, cause) {
         super(message);
         this.name = "SnapshotError";
@@ -113,6 +116,7 @@ function buildSnapshotUrl(proxyUrl, jpegSize = 1206) {
  * @param connectionType  "LOCAL" → Digest auth; "REMOTE" → plain GET
  * @param user            Digest username (cbs-<USERNAME> for LOCAL; ignored for REMOTE)
  * @param password        Digest password (for LOCAL; ignored for REMOTE)
+ * @param options
  * @param options.timeout Request timeout in ms (default 6000 — matches HA's 6 s cap)
  * @returns               JPEG image bytes as Buffer
  * @throws SnapshotError  On non-200 status / non-image content-type / empty body / network error
