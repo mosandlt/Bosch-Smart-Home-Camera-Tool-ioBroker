@@ -6,20 +6,20 @@ See the [Home Assistant integration](https://github.com/mosandlt/Bosch-Smart-Hom
 
 ## Status
 
-**Alpha (v0.3.2)** — verified live against 4 cameras (Gen1 + Gen2, FW 7.91.56 / 9.40.25) on a real ioBroker instance.
+**Alpha (v0.3.3)** — verified live against 4 cameras (Gen1 + Gen2, FW 7.91.56 / 9.40.25) on a real ioBroker instance.
 
 What works:
 - Browser-based OAuth2 PKCE login via Bosch SingleKey ID (no programmatic password handling — captcha/MFA happen in the browser)
-- Token auto-refresh (~45 min cadence; 4xx → re-login required, 5xx → silent retry)
+- Token auto-refresh (~45 min cadence; 4xx → re-login required, 5xx → silent retry). Stored `refresh_token` also used at startup to mint a fresh `access_token` silently — no PKCE re-login required after restart, even if the adapter was stopped longer than the 1 h access-token lifetime.
 - Camera discovery (Gen1 + Gen2, `GET /v11/video_inputs`)
 - Per-camera state tree: `name`, `firmware_version`, `hardware_version`, `generation`, `online`, `privacy_enabled`, `light_enabled`, `image_rotation_180`, `snapshot_trigger`, `snapshot_path`, `stream_url`, `last_motion_at`, `last_motion_event_type`
 - Privacy toggle via Bosch Cloud API `PUT /v11/video_inputs/{id}/privacy`
 - Light toggle, Gen-specific:
   - Gen2: `PUT /lighting/switch/front` + `/topdown`
   - Gen1: `PUT /lighting_override` (frontLightOn + wallwasherOn)
-- Snapshot trigger writes JPEG into the adapter file-store (`/<namespace>/cameras/<id>/snapshot.jpg`), with automatic retry on the first "stream has been aborted" hiccup that Bosch Gen2 firmware emits after idle
+- Snapshot trigger writes JPEG into the adapter file-store (`/<namespace>/cameras/<id>/snapshot.jpg`), with automatic retry on the first "stream has been aborted" hiccup that Bosch Gen2 firmware emits after idle. One startup snapshot per camera flips `cameras.<id>.online` from the default `false` to the real state immediately.
 - Per-camera TLS proxy: `stream_url = rtsp://127.0.0.1:<port>/rtsp_tunnel` for use in `iobroker.cameras` or go2rtc
-- FCM push listener (`@aracna/fcm@1.0.32` MTalk/MCS) for sub-second motion / audio-alarm / person events. `info.fcm_active` reflects state: `healthy` / `error` / `disconnected` / `stopped`
+- FCM push listener (`@aracna/fcm@1.0.32` MTalk/MCS) for sub-second motion / audio-alarm / person events. `info.fcm_active` reflects state: `healthy` / `polling` / `error` / `disconnected` / `stopped`. When push registration fails the adapter falls back to `/v11/events` polling every 30 s (`info.fcm_active=polling`) — events still arrive, just with higher latency.
 - Encrypted credential storage (`encryptedNative` — js-controller encrypts the refresh token at rest)
 - 310 unit tests passing
 
@@ -127,6 +127,14 @@ npm run release major    # 0.3.0 → 1.0.0
 <!-- Older releases archived in CHANGELOG_OLD.md. -->
 
 ### **WORK IN PROGRESS**
+
+### 0.3.3 (2026-05-13)
+- Single Bosch OSS Firebase API key for both iOS and Android registration paths — retired APK-extracted keys
+- FCM diagnostic logging: new `mode-failed` event surfaces HTTP status + URL + Google error message (replaces silent catch in `_tryStart`)
+- Polling fallback like the HA integration: when both modes fail `info.fcm_active="polling"` (not `error`) and `/v11/events` is polled every 30 s — adapter stays usable
+- Auto-snapshot per camera at adapter start so `cameras.<id>.online` flips from default `false` to real state immediately
+- Startup token refresh via stored `refresh_token` before falling back to PKCE — eliminates `No PKCE verifier stored` crash after long downtime
+- Polling-fallback `setInterval` is `unref()`'d so mocha exits cleanly when FCM mock fails
 
 ### 0.3.2 (2026-05-13)
 - Repochecker compliance round 2–3 — see `io-package.json` news for detail
