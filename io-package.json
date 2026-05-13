@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "news": {
+      "0.3.2": {
+        "en": "Repochecker compliance round 2-3: node: prefix on built-in imports, .vscode + dependabot config, eslint v9 migration with @iobroker/eslint-config, .releaseconfig.json now included in npm tarball, axios-cookiejar-support pinned to v6 for Node 20 CI compat. No behaviour changes — 310 tests still passing.",
+        "de": "Repochecker-Compliance Runde 2-3: node: Präfix für Built-in-Imports, .vscode + Dependabot Konfig, eslint v9 Migration mit @iobroker/eslint-config, .releaseconfig.json nun im npm Tarball, axios-cookiejar-support auf v6 fixiert für Node 20 CI-Kompatibilität. Keine Verhaltensänderungen — 310 Tests weiterhin grün.",
+        "ru": "Соответствие Repochecker раунд 2-3: префикс node: для встроенных импортов, конфиги .vscode + dependabot, миграция на eslint v9 с @iobroker/eslint-config, .releaseconfig.json теперь в npm tarball, axios-cookiejar-support зафиксирован на v6 для совместимости Node 20 CI. Изменений поведения нет — 310 тестов проходят.",
+        "pt": "Conformidade Repochecker rodada 2-3: prefixo node: em imports built-in, configs .vscode + dependabot, migração eslint v9 com @iobroker/eslint-config, .releaseconfig.json agora incluído no tarball npm, axios-cookiejar-support fixado em v6 para compatibilidade Node 20 CI. Sem mudanças de comportamento — 310 testes ainda passando.",
+        "nl": "Repochecker compliance ronde 2-3: node: prefix op built-in imports, .vscode + dependabot config, eslint v9 migratie met @iobroker/eslint-config, .releaseconfig.json nu inbegrepen in npm tarball, axios-cookiejar-support vastgepind op v6 voor Node 20 CI compat. Geen gedragsveranderingen — 310 tests blijven slagen.",
+        "fr": "Conformité Repochecker tour 2-3 : préfixe node: sur les imports built-in, configs .vscode + dependabot, migration eslint v9 avec @iobroker/eslint-config, .releaseconfig.json inclus dans le tarball npm, axios-cookiejar-support épinglé à v6 pour la compatibilité Node 20 CI. Aucun changement de comportement — 310 tests toujours OK.",
+        "it": "Conformità Repochecker round 2-3: prefisso node: per gli import built-in, config .vscode + dependabot, migrazione eslint v9 con @iobroker/eslint-config, .releaseconfig.json ora incluso nel tarball npm, axios-cookiejar-support fissato a v6 per compatibilità Node 20 CI. Nessun cambio di comportamento — 310 test ancora superati.",
+        "es": "Cumplimiento Repochecker ronda 2-3: prefijo node: en imports built-in, configs .vscode + dependabot, migración eslint v9 con @iobroker/eslint-config, .releaseconfig.json ahora incluido en el tarball npm, axios-cookiejar-support fijado a v6 para compat Node 20 CI. Sin cambios de comportamiento — 310 tests siguen pasando.",
+        "pl": "Zgodność z Repochecker runda 2-3: prefiks node: dla wbudowanych importów, konfig .vscode + dependabot, migracja eslint v9 z @iobroker/eslint-config, .releaseconfig.json teraz w tarballu npm, axios-cookiejar-support zablokowany na v6 dla kompat Node 20 CI. Bez zmian zachowania — 310 testów nadal przechodzi.",
+        "uk": "Сумісність з Repochecker раунд 2-3: префікс node: для вбудованих імпортів, конфіги .vscode + dependabot, міграція на eslint v9 з @iobroker/eslint-config, .releaseconfig.json тепер у npm tarball, axios-cookiejar-support зафіксовано на v6 для сумісності Node 20 CI. Без змін поведінки — 310 тестів проходять.",
+        "zh-cn": "Repochecker 合规第 2-3 轮：内置导入使用 node: 前缀，.vscode + dependabot 配置，迁移到 eslint v9 配合 @iobroker/eslint-config，.releaseconfig.json 现在包含在 npm tarball 中，axios-cookiejar-support 固定在 v6 以保证 Node 20 CI 兼容性。无行为变化 — 310 个测试仍通过。"
+      },
       "0.3.1": {
         "en": "VIS-2 example dashboard fixes (canvas height, native widget templates, status bar labels). Auto-snapshot fetch after Privacy=off or Light toggle so dashboards reflect new state immediately. Camera online state now reflects snapshot reachability (true on success, false after 3 consecutive failures). Repochecker compliance: dependency bumps, schema fixes, workflow restructure for Latest-Repo submission.",
         "de": "VIS-2-Beispiel-Dashboard-Fixes (Canvas-Höhe, native Widget-Templates, Statusbar-Labels). Automatischer Snapshot nach Privacy=aus oder Licht-Toggle, damit Dashboards den neuen Zustand sofort anzeigen. Kamera-Online-Status reflektiert jetzt die Snapshot-Erreichbarkeit (true bei Erfolg, false nach 3 aufeinanderfolgenden Fehlern). Repochecker-Compliance: Dependency-Bumps, Schema-Fixes, Workflow-Umbau für Latest-Repo-Submission.",
@@ -133,7 +146,7 @@
     ],
     "globalDependencies": [
       {
-        "admin": ">=7.6.17"
+        "admin": ">=7.6.20"
       }
     ]
   },

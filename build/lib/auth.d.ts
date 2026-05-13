@@ -28,7 +28,7 @@
  *   HTTP 400/401 → RefreshTokenInvalidError (non-recoverable, need re-login)
  *   HTTP 5xx     → AuthServerOutageError (retry later, do NOT force re-login)
  */
-import * as crypto from "crypto";
+import * as crypto from "node:crypto";
 import { type AxiosInstance } from "axios";
 export declare const KEYCLOAK_BASE: string;
 export declare const CLIENT_ID = "oss_residential_app";
@@ -43,16 +43,40 @@ export declare const REDIRECT_URI = "https://www.bosch.com/boschcam";
 export declare const CLOUD_API = "https://residential.cbs.boschsecurity.com";
 /** Token response from Bosch Keycloak */
 export interface TokenResult {
+    /**
+     *
+     */
     access_token: string;
+    /**
+     *
+     */
     refresh_token: string;
+    /**
+     *
+     */
     expires_in: number;
+    /**
+     *
+     */
     refresh_expires_in: number;
+    /**
+     *
+     */
     token_type: string;
+    /**
+     *
+     */
     scope: string;
 }
 /** PKCE verifier + challenge pair */
 export interface PkcePair {
+    /**
+     *
+     */
     verifier: string;
+    /**
+     *
+     */
     challenge: string;
 }
 /**
@@ -60,6 +84,9 @@ export interface PkcePair {
  * Non-recoverable — user must re-authenticate interactively.
  */
 export declare class RefreshTokenInvalidError extends Error {
+    /**
+     *
+     */
     constructor(message: string);
 }
 /**
@@ -67,6 +94,9 @@ export declare class RefreshTokenInvalidError extends Error {
  * The token is likely still valid — retry after backoff, do NOT prompt re-login.
  */
 export declare class AuthServerOutageError extends Error {
+    /**
+     *
+     */
     constructor(message: string);
 }
 /**

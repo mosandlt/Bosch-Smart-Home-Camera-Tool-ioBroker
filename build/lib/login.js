@@ -95,10 +95,13 @@ const axios_1 = __importDefault(require("axios"));
 const tough_cookie_1 = require("tough-cookie");
 const axios_cookiejar_support_1 = require("axios-cookiejar-support");
 const auth_1 = require("./auth");
-const crypto = __importStar(require("crypto"));
+const crypto = __importStar(require("node:crypto"));
 // ── Error classes ─────────────────────────────────────────────────────────────
 /** Thrown when SingleKey ID rejects username or password. */
 class InvalidCredentialsError extends Error {
+    /**
+     *
+     */
     constructor(message = "Invalid credentials") {
         super(message);
         this.name = "InvalidCredentialsError";
@@ -112,6 +115,9 @@ exports.InvalidCredentialsError = InvalidCredentialsError;
  * - Additional account verification
  */
 class MfaRequiredError extends Error {
+    /**
+     *
+     */
     constructor(message = "MFA or additional verification required") {
         super(message);
         this.name = "MfaRequiredError";
@@ -120,6 +126,9 @@ class MfaRequiredError extends Error {
 exports.MfaRequiredError = MfaRequiredError;
 /** Thrown when the login flow fails for non-credential reasons (5xx, network, parsing errors). */
 class LoginFlowError extends Error {
+    /**
+     *
+     */
     constructor(message) {
         super(message);
         this.name = "LoginFlowError";
@@ -195,22 +204,30 @@ function extractCodeFromLocation(location) {
 /**
  * Detect hCaptcha / reCAPTCHA on a page.
  * SingleKey ID uses hCaptcha (sitekey f8fe2d56-...) on the email submit button.
+ *
+ * @param html
  */
 function detectCaptcha(html) {
     return /h-captcha|recaptcha|g-recaptcha|data-sitekey/i.test(html);
 }
 /**
  * Detect MFA / 2FA challenge page.
+ *
+ * @param html
  */
 function detectMfa(html) {
     return /enter (verification|authentication) code|two-factor|authenticator app|verify your identity/i.test(html);
 }
 // Keep the old extractFormAction export for backward-compatibility with existing tests
 // (tests that stub a Keycloak-style form with explicit action= still pass).
+/**
+ *
+ */
 function extractFormAction(html) {
     const match = html.match(/<form[^>]+action="([^"]+)"/i);
-    if (!match)
+    if (!match) {
         return null;
+    }
     return match[1]
         .replace(/&amp;/g, "&")
         .replace(/&lt;/g, "<")
@@ -267,13 +284,15 @@ async function loginWithCredentials(httpClient, username, password) {
             throw new LoginFlowError(`Auth server error HTTP ${emailPageResp.status}`);
         }
         // After following redirects, request.res.responseUrl is the final URL
-        emailPageUrl = emailPageResp.request
-            ?.res?.responseUrl ?? authUrl;
+        emailPageUrl =
+            emailPageResp.request?.res?.responseUrl ??
+                authUrl;
         emailHtml = emailPageResp.data;
     }
     catch (err) {
-        if (err instanceof LoginFlowError)
+        if (err instanceof LoginFlowError) {
             throw err;
+        }
         if (axios_1.default.isAxiosError(err)) {
             const status = err.response?.status;
             if (status === 400) {
@@ -297,9 +316,9 @@ async function loginWithCredentials(httpClient, username, password) {
     const returnPath = returnPathMatch?.[1]?.replace(/&amp;/g, "&") ?? "";
     const emailBody = new URLSearchParams({
         "UserIdentifierInput.EmailInput.StringValue": username,
-        "__RequestVerificationToken": emailForm.csrf,
-        "credential": "",
-        "returnPath": returnPath,
+        __RequestVerificationToken: emailForm.csrf,
+        credential: "",
+        returnPath: returnPath,
     });
     let passwordPageUrl;
     let passwordHtml;
@@ -307,7 +326,7 @@ async function loginWithCredentials(httpClient, username, password) {
         const passwordPageResp = await jarClient.post(emailForm.action, emailBody.toString(), {
             headers: {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
             responseType: "text",
         });
@@ -317,13 +336,15 @@ async function loginWithCredentials(httpClient, username, password) {
         if (passwordPageResp.status >= 400) {
             throw new LoginFlowError(`Email POST rejected HTTP ${passwordPageResp.status}`);
         }
-        passwordPageUrl = passwordPageResp.request
-            ?.res?.responseUrl ?? emailForm.action;
+        passwordPageUrl =
+            passwordPageResp.request?.res?.responseUrl ??
+                emailForm.action;
         passwordHtml = passwordPageResp.data;
     }
     catch (err) {
-        if (err instanceof LoginFlowError)
+        if (err instanceof LoginFlowError) {
             throw err;
+        }
         if (axios_1.default.isAxiosError(err)) {
             const status = err.response?.status;
             if (status !== undefined && status >= 500) {
@@ -370,23 +391,24 @@ async function loginWithCredentials(httpClient, username, password) {
     // (matches SingleKey ID naming convention: UserIdentifierInput.EmailInput.StringValue)
     const passwordBody = new URLSearchParams({
         "Password.PasswordInput.StringValue": password,
-        "__RequestVerificationToken": passwordForm.csrf,
-        "credential": "",
-        "returnPath": pwdReturnPath,
+        __RequestVerificationToken: passwordForm.csrf,
+        credential: "",
+        returnPath: pwdReturnPath,
     });
     let finalUrl;
     try {
         const submitResp = await jarClient.post(passwordForm.action, passwordBody.toString(), {
             headers: {
                 "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
             responseType: "text",
             // Follow redirects: Bosch OIDC callback chain after successful password
             maxRedirects: 15,
         });
-        finalUrl = submitResp.request
-            ?.res?.responseUrl ?? passwordForm.action;
+        finalUrl =
+            submitResp.request?.res?.responseUrl ??
+                passwordForm.action;
         const submitHtml = submitResp.data ?? "";
         // 200 with password form → wrong password
         if (submitResp.status === 200 && submitHtml.includes("PasswordInput")) {
@@ -397,8 +419,9 @@ async function loginWithCredentials(httpClient, username, password) {
         }
     }
     catch (err) {
-        if (err instanceof InvalidCredentialsError || err instanceof LoginFlowError)
+        if (err instanceof InvalidCredentialsError || err instanceof LoginFlowError) {
             throw err;
+        }
         if (axios_1.default.isAxiosError(err)) {
             const status = err.response?.status;
             if (status !== undefined && status >= 500) {

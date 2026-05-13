@@ -37,7 +37,7 @@
  * embedded in every Bosch Smart Camera APK, confirmed by Bosch.
  */
 
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { AxiosInstance } from "axios";
 import {
     FcmClient,
@@ -45,7 +45,6 @@ import {
     generateFcmAuthSecret,
     registerToFCM,
     type FcmClientMessageData,
-    type FcmRegistration,
 } from "@aracna/fcm";
 
 // ── Constants (from Python fcm.py) ───────────────────────────────────────────
@@ -121,6 +120,9 @@ export interface FcmRawCredentials {
  * Intended to be persisted by the caller across restarts.
  */
 export interface FcmCredentials {
+    /**
+     *
+     */
     fcmToken: string;
     /** Push mode actually used ("ios" | "android") */
     mode: "ios" | "android";
@@ -152,6 +154,9 @@ export interface FcmListenerOptions {
  * Thrown when CBS device registration fails with a non-retryable HTTP error.
  */
 export class FcmCbsRegistrationError extends Error {
+    /**
+     *
+     */
     constructor(
         public readonly httpStatus: number,
         message: string,
@@ -165,7 +170,13 @@ export class FcmCbsRegistrationError extends Error {
  * Thrown when FCM registration fails (network error or Google API rejection).
  */
 export class FcmRegistrationError extends Error {
-    constructor(message: string, public readonly cause?: unknown) {
+    /**
+     *
+     */
+    constructor(
+        message: string,
+        public readonly cause?: unknown,
+    ) {
         super(message);
         this.name = "FcmRegistrationError";
     }
@@ -210,9 +221,21 @@ export class FcmRegistrationError extends Error {
  * Tests pass a `deps` object with sinon stubs.
  */
 export interface FcmDeps {
+    /**
+     *
+     */
     registerToFCM: typeof registerToFCM;
+    /**
+     *
+     */
     createFcmECDH: typeof createFcmECDH;
+    /**
+     *
+     */
     generateFcmAuthSecret: typeof generateFcmAuthSecret;
+    /**
+     *
+     */
     FcmClient: typeof FcmClient;
 }
 
@@ -224,6 +247,9 @@ const DEFAULT_DEPS: FcmDeps = {
     FcmClient,
 };
 
+/**
+ *
+ */
 export class FcmListener extends EventEmitter {
     private readonly _httpClient: AxiosInstance;
     private readonly _bearerToken: string;
@@ -235,6 +261,9 @@ export class FcmListener extends EventEmitter {
     private _running = false;
     private _clientHandle: FcmClient | null = null;
 
+    /**
+     *
+     */
     constructor(
         httpClient: AxiosInstance,
         bearerToken: string,
@@ -258,7 +287,7 @@ export class FcmListener extends EventEmitter {
      * Step 3: Register the FCM token with Bosch CBS (POST /v11/devices).
      * Step 4: Start FcmClient TLS socket → emit "push" on every incoming message.
      *
-     * @emits "registered" with FcmCredentials once FCM + CBS registration complete.
+     * @fires "registered" with FcmCredentials once FCM + CBS registration complete.
      * @throws FcmRegistrationError   if Google FCM registration fails.
      * @throws FcmCbsRegistrationError if Bosch CBS rejects the token (HTTP 4xx).
      */
@@ -272,7 +301,9 @@ export class FcmListener extends EventEmitter {
         if (mode === "auto") {
             // Try iOS first, then Android — mirrors Python _try_fcm_with_mode logic
             const iosOk = await this._tryStart("ios");
-            if (iosOk) return;
+            if (iosOk) {
+                return;
+            }
             const androidOk = await this._tryStart("android");
             if (!androidOk) {
                 throw new FcmRegistrationError(
@@ -282,9 +313,7 @@ export class FcmListener extends EventEmitter {
         } else {
             const ok = await this._tryStart(mode);
             if (!ok) {
-                throw new FcmRegistrationError(
-                    `FCM: registration failed for mode '${mode}'`,
-                );
+                throw new FcmRegistrationError(`FCM: registration failed for mode '${mode}'`);
             }
         }
     }
@@ -292,7 +321,8 @@ export class FcmListener extends EventEmitter {
     /**
      * Stop the listener cleanly. Closes the MTalk TLS socket and sets state to
      * stopped. Safe to call multiple times (idempotent).
-     * @emits "disconnect"
+     *
+     * @fires "disconnect"
      */
     async stop(): Promise<void> {
         if (!this._running) {
@@ -331,6 +361,8 @@ export class FcmListener extends EventEmitter {
     /**
      * Attempt FCM registration + CBS registration + client start for a single mode.
      * Returns true on success, false on any error (caller logs and falls back).
+     *
+     * @param mode
      */
     private async _tryStart(mode: "ios" | "android"): Promise<boolean> {
         const deps = this._deps;
@@ -339,7 +371,18 @@ export class FcmListener extends EventEmitter {
             const saved = this._options.savedCredentials?.raw;
             let ecdh = deps.createFcmECDH();
             let authSecret: Buffer;
-            let acgInit: { id?: bigint; securityToken?: bigint } | undefined;
+            let acgInit:
+                | {
+                      /**
+                       *
+                       */
+                      id?: bigint;
+                      /**
+                       *
+                       */
+                      securityToken?: bigint;
+                  }
+                | undefined;
 
             if (saved && saved.mode === mode) {
                 // Restore persisted keys so we can reuse the existing ACG registration
@@ -383,7 +426,7 @@ export class FcmListener extends EventEmitter {
                 );
             }
 
-            const fcmRegistration = reg as FcmRegistration;
+            const fcmRegistration = reg;
             this._fcmToken = fcmRegistration.token;
 
             // Build raw credentials for persistence
@@ -442,7 +485,7 @@ export class FcmListener extends EventEmitter {
             this._running = true;
 
             return true;
-        } catch (err: unknown) {
+        } catch {
             // Do not emit "error" here — _tryStart is internal. The caller
             // (start()) will emit "error" or throw FcmRegistrationError once all
             // modes have been tried. Emitting "error" from _tryStart without a
@@ -458,6 +501,8 @@ export class FcmListener extends EventEmitter {
      * HTTP 204 → success. HTTP 500 + "sh:internal.error" → already registered
      * (treat as success, same as Python register_fcm_with_bosch()).
      *
+     * @param token
+     * @param mode
      * @throws FcmCbsRegistrationError on non-retryable HTTP 4xx.
      */
     async _registerWithCbs(token: string, mode: "ios" | "android"): Promise<void> {
@@ -474,13 +519,14 @@ export class FcmListener extends EventEmitter {
                 validateStatus: () => true,
             },
         );
-        const status = resp.status as number;
+        const status = resp.status;
         if (status === 200 || status === 201 || status === 204) {
             return; // success
         }
         // Bosch returns HTTP 500 "sh:internal.error" for duplicate registrations
         if (status === 500) {
-            const body = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data ?? "");
+            const body =
+                typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data ?? "");
             if (body.includes("sh:internal.error")) {
                 return; // already registered — treat as success
             }
@@ -504,6 +550,8 @@ export class FcmListener extends EventEmitter {
      * If the data dict contains event type info, also parses and emits the typed event.
      *
      * Mirrors Python _on_fcm_push() + async_handle_fcm_push() flow.
+     *
+     * @param data
      */
     private _onPush(data: FcmClientMessageData): void {
         // Emit raw push so coordinator can trigger event fetch
@@ -511,9 +559,7 @@ export class FcmListener extends EventEmitter {
 
         // Best-effort: parse typed event if the push contains explicit data
         if (data.data && Object.keys(data.data).length > 0) {
-            const parsed = this._parseNotification(
-                data.data as Record<string, unknown>,
-            );
+            const parsed = this._parseNotification(data.data);
             if (parsed) {
                 this.emit(parsed.eventType, parsed);
             }
@@ -528,18 +574,19 @@ export class FcmListener extends EventEmitter {
      *   - eventType=MOVEMENT                        → eventType="motion"
      *   - eventType=AUDIO_ALARM                     → eventType="audio_alarm"
      *
+     * @param raw
      * @returns Parsed payload, or null if the event type is not recognised.
      */
     _parseNotification(raw: Record<string, unknown>): FcmEventPayload | null {
-        const cameraId   = (raw["camera_id"]   ?? raw["cameraId"]   ?? "") as string;
-        const cameraName = (raw["camera_name"] ?? raw["cameraName"] ?? "") as string;
-        const timestamp  = (raw["timestamp"]   ?? "") as string;
-        const imageUrl   = (raw["image_url"]   ?? raw["imageUrl"]   ?? "") as string;
-        const eventId    = (raw["event_id"]    ?? raw["eventId"]    ?? "") as string;
+        const cameraId = (raw.camera_id ?? raw.cameraId ?? "") as string;
+        const cameraName = (raw.camera_name ?? raw.cameraName ?? "") as string;
+        const timestamp = (raw.timestamp ?? "") as string;
+        const imageUrl = (raw.image_url ?? raw.imageUrl ?? "") as string;
+        const eventId = (raw.event_id ?? raw.eventId ?? "") as string;
 
         // Normalise raw Bosch event type (matches Python fcm.py PERSON upgrade logic)
-        const rawType = ((raw["event_type"] ?? raw["eventType"] ?? "") as string).toUpperCase();
-        const tags    = (raw["event_tags"] ?? raw["eventTags"] ?? []) as string[];
+        const rawType = ((raw.event_type ?? raw.eventType ?? "") as string).toUpperCase();
+        const tags = (raw.event_tags ?? raw.eventTags ?? []) as string[];
 
         let eventType: FcmEventPayload["eventType"];
         if (rawType === "MOVEMENT" && tags.includes("PERSON")) {
@@ -560,7 +607,7 @@ export class FcmListener extends EventEmitter {
             timestamp,
             eventType,
             imageUrl: imageUrl || undefined,
-            eventId:  eventId  || undefined,
+            eventId: eventId || undefined,
         };
     }
 }

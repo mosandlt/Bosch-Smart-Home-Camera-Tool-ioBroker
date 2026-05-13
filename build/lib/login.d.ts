@@ -50,6 +50,9 @@ import { type AxiosInstance } from "axios";
 import { type TokenResult } from "./auth";
 /** Thrown when SingleKey ID rejects username or password. */
 export declare class InvalidCredentialsError extends Error {
+    /**
+     *
+     */
     constructor(message?: string);
 }
 /**
@@ -59,10 +62,16 @@ export declare class InvalidCredentialsError extends Error {
  * - Additional account verification
  */
 export declare class MfaRequiredError extends Error {
+    /**
+     *
+     */
     constructor(message?: string);
 }
 /** Thrown when the login flow fails for non-credential reasons (5xx, network, parsing errors). */
 export declare class LoginFlowError extends Error {
+    /**
+     *
+     */
     constructor(message: string);
 }
 /**
@@ -92,12 +101,19 @@ export declare function extractCodeFromLocation(location: string): string | null
 /**
  * Detect hCaptcha / reCAPTCHA on a page.
  * SingleKey ID uses hCaptcha (sitekey f8fe2d56-...) on the email submit button.
+ *
+ * @param html
  */
 export declare function detectCaptcha(html: string): boolean;
 /**
  * Detect MFA / 2FA challenge page.
+ *
+ * @param html
  */
 export declare function detectMfa(html: string): boolean;
+/**
+ *
+ */
 export declare function extractFormAction(html: string): string | null;
 /**
  * End-to-end programmatic OAuth2 login for Bosch SingleKey ID.

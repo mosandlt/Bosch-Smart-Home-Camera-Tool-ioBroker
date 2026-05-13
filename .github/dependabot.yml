@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 10
+    versioning-strategy: increase
+    # Cooldown reduces supply-chain risk by delaying brand-new releases.
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+      - github_actions

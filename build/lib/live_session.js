@@ -76,6 +76,10 @@ const SNAP_SUFFIX = "/snap.jpg?JpegSize=1206";
  *
  * LOCAL:  imageUrlScheme = "https://{url}/snap.jpg"; substitute {url} = "192.168.x.x:443"
  * REMOTE: urls[0] = "proxy-NN:42090/{hash}" → prepend "https://"
+ *
+ * @param connectionType
+ * @param urlEntry
+ * @param imageUrlScheme
  */
 function buildProxyUrl(connectionType, urlEntry, imageUrlScheme) {
     if (connectionType === "LOCAL") {
@@ -84,7 +88,7 @@ function buildProxyUrl(connectionType, urlEntry, imageUrlScheme) {
         let url = scheme.replace("{url}", urlEntry);
         // Ensure JpegSize is set
         if (!url.includes("JpegSize=")) {
-            url += (url.includes("?") ? "&" : "?") + "JpegSize=1206";
+            url += `${url.includes("?") ? "&" : "?"}JpegSize=1206`;
         }
         return url;
     }
@@ -115,9 +119,7 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
     // AUTO → try LOCAL first (mirrors HA AUTO behaviour on LAN); we pass "LOCAL"
     // and let callers fall back to REMOTE_ONLY on failure if needed.
     // For simplicity in the ioBroker adapter, mode collapses to a single PUT.
-    const typeVal = mode === "LOCAL_ONLY" ? "LOCAL" :
-        mode === "REMOTE_ONLY" ? "REMOTE" :
-            /* AUTO */ "LOCAL";
+    const typeVal = mode === "LOCAL_ONLY" ? "LOCAL" : mode === "REMOTE_ONLY" ? "REMOTE" : /* AUTO */ "LOCAL";
     const url = `${auth_1.CLOUD_API}/v11/video_inputs/${cameraId}/connection`;
     const headers = {
         Authorization: `Bearer ${token}`,
@@ -126,7 +128,6 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
     };
     const body = { type: typeVal, highQualityVideo: true };
     let status;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data;
     try {
         const resp = await httpClient.put(url, body, {
@@ -134,7 +135,6 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
             validateStatus: () => true, // handle all status codes ourselves
         });
         status = resp.status;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         data = (resp.data ?? {});
     }
     catch (err) {
@@ -157,15 +157,13 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
         throw new LiveSessionError(`PUT /connection returned HTTP ${status} for camera ${cameraId}`);
     }
     // ── Parse LOCAL response ────────────────────────────────────────────────────
-    const localUser = typeof data["user"] === "string" ? data["user"] : "";
-    const localPass = typeof data["password"] === "string" ? data["password"] : "";
-    const urls = Array.isArray(data["urls"]) ? data["urls"] : [];
-    const bufferingTimeMs = typeof data["bufferingTime"] === "number" ? data["bufferingTime"] : 1000;
+    const localUser = typeof data.user === "string" ? data.user : "";
+    const localPass = typeof data.password === "string" ? data.password : "";
+    const urls = Array.isArray(data.urls) ? data.urls : [];
+    const bufferingTimeMs = typeof data.bufferingTime === "number" ? data.bufferingTime : 1000;
     if (typeVal === "LOCAL" && localUser && localPass && urls.length > 0) {
         const lanAddr = urls[0];
-        const imageUrlScheme = typeof data["imageUrlScheme"] === "string"
-            ? data["imageUrlScheme"]
-            : undefined;
+        const imageUrlScheme = typeof data.imageUrlScheme === "string" ? data.imageUrlScheme : undefined;
         const proxyUrl = buildProxyUrl("LOCAL", lanAddr, imageUrlScheme);
         return {
             cameraId,
@@ -193,12 +191,12 @@ async function openLiveSession(httpClient, token, cameraId, mode = "AUTO") {
         };
     }
     // Legacy REMOTE shape: { hash, proxyHost, proxyPort }
-    const hash = typeof data["hash"] === "string" ? data["hash"] : "";
+    const hash = typeof data.hash === "string" ? data.hash : "";
     if (hash) {
-        const proxyHost = typeof data["proxyHost"] === "string"
-            ? data["proxyHost"]
+        const proxyHost = typeof data.proxyHost === "string"
+            ? data.proxyHost
             : "proxy-01.live.cbs.boschsecurity.com";
-        const proxyPort = typeof data["proxyPort"] === "number" ? data["proxyPort"] : 42090;
+        const proxyPort = typeof data.proxyPort === "number" ? data.proxyPort : 42090;
         const proxyUrl = `https://${proxyHost}:${proxyPort}/${hash}${SNAP_SUFFIX}`;
         return {
             cameraId,

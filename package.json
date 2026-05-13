@@ -1,7 +1,7 @@
 {
   "name": "iobroker.bosch-smart-home-camera",
-  "version": "0.3.1",
-  "description": "ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360\u00b0, Gen2 Indoor II/Outdoor II)",
+  "version": "0.3.2",
+  "description": "ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360°, Gen2 Indoor II/Outdoor II)",
   "author": {
     "name": "mosandlt",
     "email": "10558666+mosandlt@users.noreply.github.com"
@@ -22,7 +22,8 @@
     "admin/**/*",
     "io-package.json",
     "LICENSE",
-    "README.md"
+    "README.md",
+    ".releaseconfig.json"
   ],
   "engines": {
     "node": ">=20"
@@ -33,7 +34,7 @@
     "test": "npm run test:js && npm run test:package",
     "test:js": "TS_NODE_TRANSPILE_ONLY=true TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' mocha --config test/.mocharc.yml",
     "test:package": "mocha test/package.js --exit",
-    "test:integration": "mocha test/integration.js --exit",
+    "test:unit": "TS_NODE_TRANSPILE_ONLY=true TS_NODE_COMPILER_OPTIONS='{\"module\":\"commonjs\"}' mocha --config test/.mocharc.yml",
     "lint": "eslint src/ --ext .ts",
     "release": "release-script"
   },
@@ -42,7 +43,7 @@
     "@aracna/fcm": "^1.0.32",
     "@iobroker/adapter-core": "^3.3.2",
     "axios": "^1.9.0",
-    "axios-cookiejar-support": "^7.0.0",
+    "axios-cookiejar-support": "^6.0.5",
     "tough-cookie": "^6.0.1"
   },
   "devDependencies": {
@@ -51,18 +52,13 @@
     "@alcalzone/release-script-plugin-license": "^5.2.0",
     "@alcalzone/release-script-plugin-manual-review": "^5.2.0",
     "@iobroker/adapter-dev": "^1.5.0",
+    "@iobroker/eslint-config": "^2.3.4",
     "@iobroker/testing": "^5.2.2",
-    "@types/chai": "^4.3.20",
-    "@types/mocha": "^10.0.10",
     "@types/node": "^22.14.1",
-    "@types/sinon": "^17.0.4",
     "@types/tough-cookie": "^4.0.5",
     "@typescript-eslint/eslint-plugin": "^8.29.1",
     "@typescript-eslint/parser": "^8.29.1",
-    "chai": "^4.5.0",
     "eslint": "^9.24.0",
-    "mocha": "^11.1.0",
-    "sinon": "^19.0.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   },

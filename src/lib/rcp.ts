@@ -54,26 +54,30 @@ export const RCP_TYPE_DWORD = "T_DWORD" as const;
 // ── Type aliases ───────────────────────────────────────────────────────────────
 
 export type RcpDirection = typeof RCP_DIRECTION_READ | typeof RCP_DIRECTION_WRITE;
-export type RcpType = typeof RCP_TYPE_OCTET | typeof RCP_TYPE_BYTE | typeof RCP_TYPE_WORD | typeof RCP_TYPE_DWORD;
+export type RcpType =
+    | typeof RCP_TYPE_OCTET
+    | typeof RCP_TYPE_BYTE
+    | typeof RCP_TYPE_WORD
+    | typeof RCP_TYPE_DWORD;
 
 // ── Known command codes ────────────────────────────────────────────────────────
 
 /** 0x0808 — privacy mask enable/disable */
-export const CMD_PRIVACY        = "0x0808" as const;
+export const CMD_PRIVACY = "0x0808" as const;
 /** 0x099f — camera light (LED) enable/disable */
-export const CMD_LIGHT          = "0x099f" as const;
+export const CMD_LIGHT = "0x099f" as const;
 /** 0x0810 — image rotation 180° enable/disable */
 export const CMD_IMAGE_ROTATION = "0x0810" as const;
 /** 0x099e — live JPEG snapshot (320×180) */
-export const CMD_SNAPSHOT       = "0x099e" as const;
+export const CMD_SNAPSHOT = "0x099e" as const;
 /** 0x0d00 — privacy mask state (byte[1]: 1=ON, 0=OFF) */
-export const CMD_PRIVACY_MASK   = "0x0d00" as const;
+export const CMD_PRIVACY_MASK = "0x0d00" as const;
 /** 0x0c22 — LED dimmer level (T_WORD, 0-100) */
-export const CMD_LED_DIMMER     = "0x0c22" as const;
+export const CMD_LED_DIMMER = "0x0c22" as const;
 /** 0xff0c — RCP session init */
-export const CMD_SESSION_INIT   = "0xff0c" as const;
+export const CMD_SESSION_INIT = "0xff0c" as const;
 /** 0xff0d — RCP session confirm */
-export const CMD_SESSION_ACK    = "0xff0d" as const;
+export const CMD_SESSION_ACK = "0xff0d" as const;
 
 // ── RCP parameter types ────────────────────────────────────────────────────────
 
@@ -82,8 +86,17 @@ export const CMD_SESSION_ACK    = "0xff0d" as const;
  * All fields are strings (URL query params).
  */
 export interface RcpParams {
+    /**
+     *
+     */
     command: string;
+    /**
+     *
+     */
     direction: RcpDirection;
+    /**
+     *
+     */
     type: RcpType;
     /** Hex-encoded payload string, e.g. "0x01" or "00010000". Optional for READ. */
     payload?: string;
@@ -116,6 +129,9 @@ export interface RcpResponse {
  *   0xa0   — permission denied
  */
 export class RcpError extends Error {
+    /**
+     *
+     */
     constructor(
         public readonly code: string,
         public readonly command: string,
@@ -129,6 +145,9 @@ export class RcpError extends Error {
  * The RCP HTTP request failed (non-200 status or network error).
  */
 export class RcpNetworkError extends Error {
+    /**
+     *
+     */
     constructor(
         public readonly status: number | undefined,
         message: string,
@@ -201,9 +220,9 @@ export function parseRcpResponse(raw: Buffer, command = "unknown"): RcpResponse 
     }
 
     // Parse hex payload from <str>HEX</str> or <payload>HEX</payload>
-    const strMatch   = text.match(/<str>([0-9a-fA-F]+)<\/str>/i);
-    const plMatch    = text.match(/<payload>([0-9a-fA-F]+)<\/payload>/i);
-    const hexString  = (strMatch ?? plMatch)?.[1];
+    const strMatch = text.match(/<str>([0-9a-fA-F]+)<\/str>/i);
+    const plMatch = text.match(/<payload>([0-9a-fA-F]+)<\/payload>/i);
+    const hexString = (strMatch ?? plMatch)?.[1];
 
     if (hexString) {
         return { payload: Buffer.from(hexString, "hex") };
@@ -221,6 +240,8 @@ export function parseRcpResponse(raw: Buffer, command = "unknown"): RcpResponse 
  * Command 0x0808, direction WRITE, type P_OCTET.
  * Privacy mask payload: 4 bytes, byte[1] carries the mode.
  * Mirrors Python rcp_local_write_privacy() — payload "00010000" / "00000000".
+ *
+ * @param enabled
  */
 export function buildSetPrivacyFrame(enabled: boolean): RcpParams {
     const payload = enabled ? "00010000" : "00000000";
@@ -232,6 +253,8 @@ export function buildSetPrivacyFrame(enabled: boolean): RcpParams {
  *
  * Command 0x099f, direction WRITE, type P_OCTET.
  * Payload: "0x01" (on) or "0x00" (off).
+ *
+ * @param enabled
  */
 export function buildSetLightFrame(enabled: boolean): RcpParams {
     const payload = enabled ? "01" : "00";
@@ -243,6 +266,8 @@ export function buildSetLightFrame(enabled: boolean): RcpParams {
  *
  * Command 0x0810, direction WRITE, type P_OCTET.
  * Payload: "0x01" (rotated) or "0x00" (normal).
+ *
+ * @param rotated180
  */
 export function buildSetImageRotationFrame(rotated180: boolean): RcpParams {
     const payload = rotated180 ? "01" : "00";
@@ -264,7 +289,13 @@ export function buildGetSnapshotFrame(): RcpParams {
 
 /** Optional Digest auth credentials for LOCAL RCP calls. */
 export interface RcpAuth {
+    /**
+     *
+     */
     user: string;
+    /**
+     *
+     */
     password: string;
 }
 
@@ -299,7 +330,9 @@ export async function sendRcpCommand(
     // Build query string from params (RCP+ uses URL-encoded GET parameters)
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined && v !== null) qs.append(k, String(v));
+        if (v !== undefined && v !== null) {
+            qs.append(k, String(v));
+        }
     }
     const fullUrl = `${baseUrl}?${qs.toString()}`;
 
@@ -327,13 +360,13 @@ export async function sendRcpCommand(
             timeout: timeoutMs,
         });
 
-        const raw = Buffer.isBuffer(resp.data)
-            ? resp.data
-            : Buffer.from(resp.data as ArrayBuffer);
+        const raw = Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data);
 
         return parseRcpResponse(raw, params.command);
     } catch (err: unknown) {
-        if (err instanceof RcpNetworkError) throw err;
+        if (err instanceof RcpNetworkError) {
+            throw err;
+        }
         if (axios.isAxiosError(err)) {
             const status = err.response?.status;
             throw new RcpNetworkError(

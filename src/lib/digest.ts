@@ -21,25 +21,49 @@
  *   no qop    → legacy RFC 2617 mode (still used by older Bosch FW)
  */
 
-import * as crypto from "crypto";
-import * as https from "https";
-import axios, { type AxiosInstance, type AxiosResponse, type Method } from "axios";
+import * as crypto from "node:crypto";
+import * as https from "node:https";
+import axios, { type AxiosResponse, type Method } from "axios";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** Parsed Digest challenge directives from WWW-Authenticate header */
 export interface DigestChallenge {
+    /**
+     *
+     */
     realm: string;
+    /**
+     *
+     */
     nonce: string;
+    /**
+     *
+     */
     opaque?: string;
-    qop?: string;      // "auth" | "auth-int" | undefined (no qop = legacy)
+    /**
+     *
+     */
+    qop?: string; // "auth" | "auth-int" | undefined (no qop = legacy)
+    /**
+     *
+     */
     algorithm?: string; // "MD5" | "MD5-SESS" | "SHA-256" | "SHA-256-SESS"
 }
 
 /** Options for digestRequest() */
 export interface DigestRequestOptions {
+    /**
+     *
+     */
     method?: Method;
+    /**
+     *
+     */
     data?: string | Buffer;
+    /**
+     *
+     */
     headers?: Record<string, string>;
     /** Timeout in milliseconds (default: 10_000) */
     timeout?: number;
@@ -52,8 +76,17 @@ export interface DigestRequestOptions {
 
 /** Result of a digest-authenticated request */
 export interface DigestResponse {
+    /**
+     *
+     */
     status: number;
+    /**
+     *
+     */
     headers: Record<string, string>;
+    /**
+     *
+     */
     data: Buffer;
 }
 
@@ -62,6 +95,8 @@ export interface DigestResponse {
 /**
  * Compute MD5 hex digest of a UTF-8 string.
  * Mirrors Python _md5() in auth_utils.py.
+ *
+ * @param input
  */
 function md5(input: string): string {
     return crypto.createHash("md5").update(input, "utf-8").digest("hex");
@@ -70,6 +105,8 @@ function md5(input: string): string {
 /**
  * Compute SHA-256 hex digest of a UTF-8 string.
  * Mirrors Python _sha256() in auth_utils.py.
+ *
+ * @param input
  */
 function sha256(input: string): string {
     return crypto.createHash("sha256").update(input, "utf-8").digest("hex");
@@ -78,10 +115,14 @@ function sha256(input: string): string {
 /**
  * Select the hash function based on the Digest algorithm directive.
  * Defaults to MD5 if algorithm is absent or unrecognized.
+ *
+ * @param algorithm
  */
 function selectHashFn(algorithm: string | undefined): (s: string) => string {
     const alg = (algorithm ?? "MD5").toUpperCase();
-    if (alg.startsWith("SHA-256")) return sha256;
+    if (alg.startsWith("SHA-256")) {
+        return sha256;
+    }
     return md5;
 }
 
@@ -89,6 +130,7 @@ function selectHashFn(algorithm: string | undefined): (s: string) => string {
  * Parse the WWW-Authenticate: Digest header into a DigestChallenge object.
  * Mirrors Python _parse_digest_challenge() in auth_utils.py.
  *
+ * @param wwwAuthenticate
  * @throws Error if the header is not a Digest challenge or missing `nonce`
  */
 export function parseDigestChallenge(wwwAuthenticate: string): DigestChallenge {
@@ -108,16 +150,16 @@ export function parseDigestChallenge(wwwAuthenticate: string): DigestChallenge {
         params[key] = value;
     }
 
-    if (!params["nonce"]) {
+    if (!params.nonce) {
         throw new Error("Digest challenge missing required 'nonce' directive");
     }
 
     return {
-        realm: params["realm"] ?? "",
-        nonce: params["nonce"],
-        opaque: params["opaque"],
-        qop: params["qop"],
-        algorithm: params["algorithm"],
+        realm: params.realm ?? "",
+        nonce: params.nonce,
+        opaque: params.opaque,
+        qop: params.qop,
+        algorithm: params.algorithm,
     };
 }
 
@@ -191,7 +233,7 @@ export function buildDigestHeader(
         parts.push(`opaque="${opaque}"`);
     }
 
-    return "Digest " + parts.join(", ");
+    return `Digest ${parts.join(", ")}`;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -224,7 +266,6 @@ export function buildDigestHeader(
  * @param password  Digest password
  * @param options   Optional method, data, headers, timeout, rejectUnauthorized
  * @returns         DigestResponse (status + headers + data Buffer)
- *
  * @throws Error    If 401 response has no WWW-Authenticate or missing nonce
  * @throws Error    On network-level errors (propagated from axios)
  */
@@ -265,13 +306,11 @@ export async function digestRequest(
     // Step 2: Parse 401 challenge
     const wwwAuth: string = (firstResp.headers["www-authenticate"] as string) ?? "";
     if (!wwwAuth) {
-        throw new Error(
-            `Server returned 401 without WWW-Authenticate header for ${url}`,
-        );
+        throw new Error(`Server returned 401 without WWW-Authenticate header for ${url}`);
     }
 
     const challenge = parseDigestChallenge(wwwAuth);
-    const authHeader = buildDigestHeader(method as string, url, username, password, challenge);
+    const authHeader = buildDigestHeader(method, url, username, password, challenge);
 
     // Step 3: Retry with Authorization header
     const authOpts = {
@@ -292,6 +331,11 @@ export async function digestRequest(
 
 /**
  * Convenience wrapper: perform a GET request with Digest auth.
+ *
+ * @param url
+ * @param username
+ * @param password
+ * @param options
  */
 export async function digestGet(
     url: string,
@@ -304,6 +348,12 @@ export async function digestGet(
 
 /**
  * Convenience wrapper: perform a PUT request with Digest auth.
+ *
+ * @param url
+ * @param username
+ * @param password
+ * @param data
+ * @param options
  */
 export async function digestPut(
     url: string,

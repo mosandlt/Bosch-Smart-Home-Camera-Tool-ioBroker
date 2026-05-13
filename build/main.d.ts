@@ -59,6 +59,9 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Write a state only if the value changed (iobroker.ring upsertState pattern).
      * Always creates the object if it doesn't exist yet, then sets ack=true.
+     *
+     * @param id
+     * @param value
      */
     private upsertState;
     /** Ensure the info channel + connection/token states exist. */
@@ -66,9 +69,15 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     /**
      * Create the cameras device + one channel per camera.
      * Uses setObjectNotExistsAsync to preserve user history config.
+     *
+     * @param cameras
      */
     private ensureCameraObjects;
-    /** Save tokens to ioBroker states (survives adapter restart). */
+    /**
+     * Save tokens to ioBroker states (survives adapter restart).
+     *
+     * @param tokens
+     */
     private saveTokens;
     /**
      * Load tokens from ioBroker states (from a previous run).
@@ -92,6 +101,8 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * (REMOTE). We treat it as minimum keepalive time and open a fresh session
      * on every command if the cached one is more than 30 seconds old — a
      * conservative threshold that avoids session-expired errors in practice.
+     *
+     * @param camId
      */
     private ensureLiveSession;
     /**
@@ -130,11 +141,16 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * Called whenever a subscribed state changes.
      * Only acts on ack=false states (user commands, not adapter-reported values).
      * Routes writes to the appropriate per-camera handler.
+     *
+     * @param id
+     * @param state
      */
     private onStateChange;
     /**
      * Handle an FCM motion/person/audio_alarm push event.
      * Writes per-camera last_motion_at + last_motion_event_type states.
+     *
+     * @param ev
      */
     private onFcmEvent;
     /**
@@ -159,6 +175,9 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * is the primary (fast ~150ms) and works for both Gen1 + Gen2. RCP+ LOCAL
      * is NOT used here because Bosch's Gen2 firmware rejects WRITE 0x0808 over
      * Digest auth (verified live: HTTP 401 even with correct credentials).
+     *
+     * @param camId
+     * @param enabled
      */
     private handlePrivacyToggle;
     /**
@@ -170,6 +189,9 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      *       with body { frontLightOn, wallwasherOn, frontLightIntensity? }
      *
      * Matches HA's `async_cloud_set_camera_light()` in shc.py.
+     *
+     * @param camId
+     * @param enabled
      */
     private handleLightToggle;
     /**
@@ -183,6 +205,9 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      *
      * The flag is stored in-memory (_imageRotation) so downstream callers (snapshot
      * post-processing, UI consumers reading the state) can apply 180° transforms.
+     *
+     * @param camId
+     * @param rotated180
      */
     private handleImageRotationToggle;
     /**
@@ -194,6 +219,8 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * Outdoor (Terrasse, FW 9.40.25). The second attempt (within ~5s) always
      * succeeds. We retry once with a short backoff before giving up; mirrors
      * HA integration's snap.jpg retry pattern.
+     *
+     * @param camId
      */
     private handleSnapshotTrigger;
     /**
@@ -203,12 +230,17 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * is whether snapshot fetches succeed. We mark a camera offline only after
      * {@link BoschSmartHomeCamera.OFFLINE_THRESHOLD} consecutive failures —
      * a single transient "stream has been aborted" must not flip the state.
+     *
+     * @param camId
+     * @param reachable
      */
     private markCameraReachability;
     /**
      * Called when the adapter is stopped.
      * Cleans up TLS proxies, FCM listener, live sessions, and the refresh timer.
      * Must always call callback() — ioBroker enforces a timeout.
+     *
+     * @param callback
      */
     private onUnload;
 }

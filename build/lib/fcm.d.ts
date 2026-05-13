@@ -36,7 +36,7 @@
  * Firebase config (Android, "bosch-smart-cameras" project) — public app identifiers
  * embedded in every Bosch Smart Camera APK, confirmed by Bosch.
  */
-import { EventEmitter } from "events";
+import { EventEmitter } from "node:events";
 import type { AxiosInstance } from "axios";
 import { FcmClient, createFcmECDH, generateFcmAuthSecret, registerToFCM } from "@aracna/fcm";
 export declare const CLOUD_API = "https://residential.cbs.boschsecurity.com";
@@ -85,6 +85,9 @@ export interface FcmRawCredentials {
  * Intended to be persisted by the caller across restarts.
  */
 export interface FcmCredentials {
+    /**
+     *
+     */
     fcmToken: string;
     /** Push mode actually used ("ios" | "android") */
     mode: "ios" | "android";
@@ -113,6 +116,9 @@ export interface FcmListenerOptions {
  */
 export declare class FcmCbsRegistrationError extends Error {
     readonly httpStatus: number;
+    /**
+     *
+     */
     constructor(httpStatus: number, message: string);
 }
 /**
@@ -120,6 +126,9 @@ export declare class FcmCbsRegistrationError extends Error {
  */
 export declare class FcmRegistrationError extends Error {
     readonly cause?: unknown | undefined;
+    /**
+     *
+     */
     constructor(message: string, cause?: unknown | undefined);
 }
 /**
@@ -159,11 +168,26 @@ export declare class FcmRegistrationError extends Error {
  * Tests pass a `deps` object with sinon stubs.
  */
 export interface FcmDeps {
+    /**
+     *
+     */
     registerToFCM: typeof registerToFCM;
+    /**
+     *
+     */
     createFcmECDH: typeof createFcmECDH;
+    /**
+     *
+     */
     generateFcmAuthSecret: typeof generateFcmAuthSecret;
+    /**
+     *
+     */
     FcmClient: typeof FcmClient;
 }
+/**
+ *
+ */
 export declare class FcmListener extends EventEmitter {
     private readonly _httpClient;
     private readonly _bearerToken;
@@ -173,6 +197,9 @@ export declare class FcmListener extends EventEmitter {
     private _fcmToken;
     private _running;
     private _clientHandle;
+    /**
+     *
+     */
     constructor(httpClient: AxiosInstance, bearerToken: string, options?: FcmListenerOptions, deps?: Partial<FcmDeps>);
     /**
      * Register with FCM and start listening for push notifications.
@@ -182,7 +209,7 @@ export declare class FcmListener extends EventEmitter {
      * Step 3: Register the FCM token with Bosch CBS (POST /v11/devices).
      * Step 4: Start FcmClient TLS socket → emit "push" on every incoming message.
      *
-     * @emits "registered" with FcmCredentials once FCM + CBS registration complete.
+     * @fires "registered" with FcmCredentials once FCM + CBS registration complete.
      * @throws FcmRegistrationError   if Google FCM registration fails.
      * @throws FcmCbsRegistrationError if Bosch CBS rejects the token (HTTP 4xx).
      */
@@ -190,7 +217,8 @@ export declare class FcmListener extends EventEmitter {
     /**
      * Stop the listener cleanly. Closes the MTalk TLS socket and sets state to
      * stopped. Safe to call multiple times (idempotent).
-     * @emits "disconnect"
+     *
+     * @fires "disconnect"
      */
     stop(): Promise<void>;
     /**
@@ -204,6 +232,8 @@ export declare class FcmListener extends EventEmitter {
     /**
      * Attempt FCM registration + CBS registration + client start for a single mode.
      * Returns true on success, false on any error (caller logs and falls back).
+     *
+     * @param mode
      */
     private _tryStart;
     /**
@@ -213,6 +243,8 @@ export declare class FcmListener extends EventEmitter {
      * HTTP 204 → success. HTTP 500 + "sh:internal.error" → already registered
      * (treat as success, same as Python register_fcm_with_bosch()).
      *
+     * @param token
+     * @param mode
      * @throws FcmCbsRegistrationError on non-retryable HTTP 4xx.
      */
     _registerWithCbs(token: string, mode: "ios" | "android"): Promise<void>;
@@ -224,6 +256,8 @@ export declare class FcmListener extends EventEmitter {
      * If the data dict contains event type info, also parses and emits the typed event.
      *
      * Mirrors Python _on_fcm_push() + async_handle_fcm_push() flow.
+     *
+     * @param data
      */
     private _onPush;
     /**
@@ -234,6 +268,7 @@ export declare class FcmListener extends EventEmitter {
      *   - eventType=MOVEMENT                        → eventType="motion"
      *   - eventType=AUDIO_ALARM                     → eventType="audio_alarm"
      *
+     * @param raw
      * @returns Parsed payload, or null if the event type is not recognised.
      */
     _parseNotification(raw: Record<string, unknown>): FcmEventPayload | null;

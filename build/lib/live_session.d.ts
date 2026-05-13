@@ -24,7 +24,7 @@
  *
  * Close: DELETE same URL (best-effort — 404 = already closed, no throw).
  */
-import { type AxiosInstance } from "axios";
+import type { AxiosInstance } from "axios";
 /**
  * Thrown on 5xx / network / malformed-response errors from the connection
  * endpoint. The session was not established.
