@@ -42,12 +42,33 @@ export interface BoschCamera {
      * Callers must check /commissioned or /ping per camera to populate.
      */
     online: boolean;
+    /**
+     * Current privacy mode as reported by the cloud list endpoint
+     * ("ON" / "OFF" / undefined when the field is absent).
+     *
+     * The same `/v11/video_inputs` response that lists cameras also carries
+     * the current `privacyMode` per camera — periodic refetch is the cheapest
+     * way to sync app-side toggles back to ioBroker (forum #84538: user set
+     * privacy via ioBroker, switched off via Bosch app, DP stayed ON).
+     */
+    privacyMode?: "ON" | "OFF";
+    /**
+     * Whether this camera reports `featureSupport.light === true`. Gen2 cams
+     * (Eyes Indoor II + Outdoor II) with the multi-LED rig set this; old Gen1
+     * with a single front LED don't. Gates the wallwasher RGB DPs so the
+     * tree doesn't grow useless nodes on Gen1 cams.
+     */
+    featureLight?: boolean;
 }
 /**
  * The cameras API rejected the token (HTTP 401).
  * Caller should refresh the token and retry once.
  */
 export declare class UnauthorizedError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string);
 }
 /**
@@ -55,6 +76,10 @@ export declare class UnauthorizedError extends Error {
  * Retry after backoff; do NOT invalidate the token.
  */
 export declare class CamerasApiError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string);
 }
 /**

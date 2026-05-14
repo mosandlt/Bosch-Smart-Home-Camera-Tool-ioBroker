@@ -47,6 +47,23 @@ export interface BoschCamera {
      * Callers must check /commissioned or /ping per camera to populate.
      */
     online: boolean;
+    /**
+     * Current privacy mode as reported by the cloud list endpoint
+     * ("ON" / "OFF" / undefined when the field is absent).
+     *
+     * The same `/v11/video_inputs` response that lists cameras also carries
+     * the current `privacyMode` per camera — periodic refetch is the cheapest
+     * way to sync app-side toggles back to ioBroker (forum #84538: user set
+     * privacy via ioBroker, switched off via Bosch app, DP stayed ON).
+     */
+    privacyMode?: "ON" | "OFF";
+    /**
+     * Whether this camera reports `featureSupport.light === true`. Gen2 cams
+     * (Eyes Indoor II + Outdoor II) with the multi-LED rig set this; old Gen1
+     * with a single front LED don't. Gates the wallwasher RGB DPs so the
+     * tree doesn't grow useless nodes on Gen1 cams.
+     */
+    featureLight?: boolean;
 }
 
 /** Raw camera object returned by GET /v11/video_inputs */
@@ -55,6 +72,8 @@ interface RawCameraItem {
     title?: unknown;
     hardwareVersion?: unknown;
     firmwareVersion?: unknown;
+    privacyMode?: unknown;
+    featureSupport?: unknown;
     [key: string]: unknown;
 }
 
@@ -65,6 +84,10 @@ interface RawCameraItem {
  * Caller should refresh the token and retry once.
  */
 export class UnauthorizedError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string) {
         super(message);
         this.name = "UnauthorizedError";
@@ -76,6 +99,10 @@ export class UnauthorizedError extends Error {
  * Retry after backoff; do NOT invalidate the token.
  */
 export class CamerasApiError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string) {
         super(message);
         this.name = "CamerasApiError";
@@ -126,6 +153,14 @@ function mapCamera(raw: RawCameraItem): BoschCamera | null {
     const name = typeof raw.title === "string" && raw.title ? raw.title : id;
     const hw = typeof raw.hardwareVersion === "string" ? raw.hardwareVersion : "";
     const fw = typeof raw.firmwareVersion === "string" ? raw.firmwareVersion : "";
+    const rawPrivacy = typeof raw.privacyMode === "string" ? raw.privacyMode.toUpperCase() : "";
+    const privacyMode: "ON" | "OFF" | undefined =
+        rawPrivacy === "ON" || rawPrivacy === "OFF" ? rawPrivacy : undefined;
+    let featureLight: boolean | undefined;
+    if (raw.featureSupport && typeof raw.featureSupport === "object") {
+        const fs = raw.featureSupport as Record<string, unknown>;
+        featureLight = typeof fs.light === "boolean" ? fs.light : undefined;
+    }
     return {
         id,
         name,
@@ -133,6 +168,8 @@ function mapCamera(raw: RawCameraItem): BoschCamera | null {
         firmwareVersion: fw,
         generation: detectGeneration(hw),
         online: false, // list endpoint does not include connection state
+        privacyMode,
+        featureLight,
     };
 }
 

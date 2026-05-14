@@ -161,6 +161,7 @@ export async function openLiveSession(
     httpClient: AxiosInstance,
     token: string,
     cameraId: string,
+    highQualityVideo: boolean = true,
 ): Promise<LiveSession> {
     const url = `${CLOUD_API}/v11/video_inputs/${cameraId}/connection`;
     const headers = {
@@ -168,7 +169,7 @@ export async function openLiveSession(
         "Content-Type": "application/json",
         Accept: "application/json",
     };
-    const body = { type: "LOCAL", highQualityVideo: true };
+    const body = { type: "LOCAL", highQualityVideo };
 
     let status: number;
     let data: Record<string, unknown>;

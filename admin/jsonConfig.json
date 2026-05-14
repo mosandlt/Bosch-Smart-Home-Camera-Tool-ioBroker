@@ -78,6 +78,75 @@
           "xl": 4
         }
       }
+    },
+    "tab_rtsp": {
+      "type": "panel",
+      "label": {
+        "en": "RTSP / Stream",
+        "de": "RTSP / Stream"
+      },
+      "items": {
+        "_info_rtsp": {
+          "type": "header",
+          "text": {
+            "en": "External recorder integration (BlueIris, Frigate, …)",
+            "de": "Externer Recorder (BlueIris, Frigate, …)"
+          },
+          "size": 5,
+          "sm": 12
+        },
+        "_rtsp_help": {
+          "type": "staticText",
+          "text": {
+            "en": "By default the per-camera RTSP proxy listens on 127.0.0.1 only — reachable from the ioBroker host itself (cameras adapter, FFmpeg, go2rtc). Enable LAN exposure to let a recorder on a different host pull the stream. The published cameras.<id>.stream_url already carries Digest credentials, so the URL works as-is once pasted into the recorder.",
+            "de": "Standardmäßig hört der RTSP-Proxy nur auf 127.0.0.1 — erreichbar vom ioBroker-Host (cameras-Adapter, FFmpeg, go2rtc). LAN-Exposition aktivieren, damit ein Recorder auf einem anderen Host den Stream ziehen kann. Die veröffentlichte cameras.<id>.stream_url enthält bereits Digest-Credentials, die URL funktioniert nach dem Einfügen direkt im Recorder."
+          },
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12
+        },
+        "rtsp_expose_to_lan": {
+          "type": "checkbox",
+          "label": {
+            "en": "Expose RTSP proxy to LAN",
+            "de": "RTSP-Proxy ins LAN freigeben"
+          },
+          "help": {
+            "en": "Bind the proxy to 0.0.0.0 (all interfaces) instead of 127.0.0.1. Required for BlueIris / Frigate on a separate host.",
+            "de": "Proxy an 0.0.0.0 (alle Interfaces) binden statt 127.0.0.1. Erforderlich für BlueIris / Frigate auf einem anderen Host."
+          },
+          "default": false,
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 6,
+          "lg": 6,
+          "xl": 6
+        },
+        "rtsp_external_host": {
+          "type": "text",
+          "label": {
+            "en": "External hostname / LAN IP",
+            "de": "Externer Hostname / LAN-IP"
+          },
+          "help": {
+            "en": "Hostname or IP the recorder should use to reach the proxy, e.g. \"192.168.1.50\". Used in the published stream_url. Leave empty to keep 127.0.0.1.",
+            "de": "Hostname oder IP, mit der der Recorder den Proxy erreicht, z. B. \"192.168.1.50\". Wird in stream_url eingetragen. Leer = 127.0.0.1."
+          },
+          "default": "",
+          "trim": true,
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 6,
+          "lg": 6,
+          "xl": 6,
+          "hidden": "!data.rtsp_expose_to_lan"
+        }
+      }
     }
   }
 }

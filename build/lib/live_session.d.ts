@@ -111,7 +111,7 @@ export interface LiveSession {
  * @throws SessionLimitError   when Bosch quota hit (444)
  * @throws LiveSessionError    on 401, 404, 5xx, network, non-LOCAL response, or malformed response
  */
-export declare function openLiveSession(httpClient: AxiosInstance, token: string, cameraId: string): Promise<LiveSession>;
+export declare function openLiveSession(httpClient: AxiosInstance, token: string, cameraId: string, highQualityVideo?: boolean): Promise<LiveSession>;
 /**
  * Close an open live session (cleanup on adapter unload).
  *

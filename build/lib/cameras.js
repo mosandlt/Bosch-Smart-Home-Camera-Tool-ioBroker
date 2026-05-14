@@ -39,6 +39,10 @@ const auth_1 = require("./auth");
  * Caller should refresh the token and retry once.
  */
 class UnauthorizedError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message) {
         super(message);
         this.name = "UnauthorizedError";
@@ -50,6 +54,10 @@ exports.UnauthorizedError = UnauthorizedError;
  * Retry after backoff; do NOT invalidate the token.
  */
 class CamerasApiError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message) {
         super(message);
         this.name = "CamerasApiError";
@@ -96,6 +104,13 @@ function mapCamera(raw) {
     const name = typeof raw.title === "string" && raw.title ? raw.title : id;
     const hw = typeof raw.hardwareVersion === "string" ? raw.hardwareVersion : "";
     const fw = typeof raw.firmwareVersion === "string" ? raw.firmwareVersion : "";
+    const rawPrivacy = typeof raw.privacyMode === "string" ? raw.privacyMode.toUpperCase() : "";
+    const privacyMode = rawPrivacy === "ON" || rawPrivacy === "OFF" ? rawPrivacy : undefined;
+    let featureLight;
+    if (raw.featureSupport && typeof raw.featureSupport === "object") {
+        const fs = raw.featureSupport;
+        featureLight = typeof fs.light === "boolean" ? fs.light : undefined;
+    }
     return {
         id,
         name,
@@ -103,6 +118,8 @@ function mapCamera(raw) {
         firmwareVersion: fw,
         generation: detectGeneration(hw),
         online: false, // list endpoint does not include connection state
+        privacyMode,
+        featureLight,
     };
 }
 /**

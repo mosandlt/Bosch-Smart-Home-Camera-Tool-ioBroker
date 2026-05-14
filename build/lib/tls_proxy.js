@@ -69,7 +69,7 @@ const _BURST_WINDOW = 30_000; // ms — window for burst counting
  */
 function startTlsProxy(options) {
     return new Promise((resolve, reject) => {
-        const { remoteHost, remotePort, cameraId, localPort = 0, rejectUnauthorized = false, } = options;
+        const { remoteHost, remotePort, cameraId, localPort = 0, bindHost = "127.0.0.1", urlHost, rejectUnauthorized = false, } = options;
         const camLabel = cameraId.slice(0, 8);
         const log = options.log ?? (() => undefined);
         // Track all live sockets so stop() can destroy them
@@ -157,11 +157,18 @@ function startTlsProxy(options) {
             reject(err);
         });
         // ── Start listening ─────────────────────────────────────────────────
-        server.listen(localPort, "127.0.0.1", () => {
+        server.listen(localPort, bindHost, () => {
             const addr = server.address();
             const port = addr.port;
-            const localRtspUrl = `rtsp://127.0.0.1:${port}/rtsp_tunnel`;
-            log("info", `TLS proxy for ${camLabel} started on 127.0.0.1:${port}` +
+            // Pick the host that will be embedded in the public URL: explicit
+            // urlHost > bindHost (but never "0.0.0.0", which is unroutable).
+            const publicHost = urlHost && urlHost.length > 0
+                ? urlHost
+                : bindHost === "0.0.0.0"
+                    ? "127.0.0.1"
+                    : bindHost;
+            const localRtspUrl = `rtsp://${publicHost}:${port}/rtsp_tunnel`;
+            log("info", `TLS proxy for ${camLabel} started on ${bindHost}:${port}` +
                 ` -> ${remoteHost}:${remotePort}`);
             // ── stop() implementation ───────────────────────────────────────
             function stop() {
@@ -183,7 +190,7 @@ function startTlsProxy(options) {
                     // complete synchronously on the next tick.
                 });
             }
-            resolve({ port, localRtspUrl, stop });
+            resolve({ port, bindHost, localRtspUrl, stop });
         });
     });
 }

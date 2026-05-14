@@ -111,14 +111,14 @@ function buildProxyUrl(urlEntry, imageUrlScheme) {
  * @throws SessionLimitError   when Bosch quota hit (444)
  * @throws LiveSessionError    on 401, 404, 5xx, network, non-LOCAL response, or malformed response
  */
-async function openLiveSession(httpClient, token, cameraId) {
+async function openLiveSession(httpClient, token, cameraId, highQualityVideo = true) {
     const url = `${auth_1.CLOUD_API}/v11/video_inputs/${cameraId}/connection`;
     const headers = {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: "application/json",
     };
-    const body = { type: "LOCAL", highQualityVideo: true };
+    const body = { type: "LOCAL", highQualityVideo };
     let status;
     let data;
     try {

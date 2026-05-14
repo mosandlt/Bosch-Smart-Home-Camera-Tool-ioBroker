@@ -1,0 +1,52 @@
+<!--
+  Dusk → Auto-Wallwasher
+  ======================
+  Turns the master wallwasher on at civil dusk (sun elevation -5°),
+  off at civil dawn. Follows the seasons automatically — no manual schedule.
+
+  Setup:
+    1. Run master-wallwasher-switch.xml first so 0_userdata.0.master_wallwasher
+       drives all cameras. This script then just toggles that one master.
+       (Alternative: replace the OID inside the two `control` blocks with each
+       individual cameras.<UUID>.wallwasher_enabled, then duplicate per cam.)
+    2. The Astro feature requires lat/lon set on the javascript adapter
+       (Instances → javascript.0 → settings).
+    3. Save + Run.
+
+  Tweak: edit the `astro` block to use "dawn", "dusk", "nauticalDawn",
+  "nauticalDusk" etc. for different darkness levels.
+-->
+<xml xmlns="https://developers.google.com/blockly/xml">
+  <block type="astro" id="dusk_on" x="0" y="0">
+    <field name="TYPE">dusk</field>
+    <field name="OFFSET">0</field>
+    <statement name="STATEMENT">
+      <block type="control" id="ctrl_on">
+        <mutation delay_input="false"></mutation>
+        <field name="OID">0_userdata.0.master_wallwasher</field>
+        <field name="WITH_DELAY">FALSE</field>
+        <value name="VALUE">
+          <block type="logic_boolean" id="bool_true">
+            <field name="BOOL">TRUE</field>
+          </block>
+        </value>
+      </block>
+    </statement>
+  </block>
+  <block type="astro" id="dawn_off" x="0" y="200">
+    <field name="TYPE">dawn</field>
+    <field name="OFFSET">0</field>
+    <statement name="STATEMENT">
+      <block type="control" id="ctrl_off">
+        <mutation delay_input="false"></mutation>
+        <field name="OID">0_userdata.0.master_wallwasher</field>
+        <field name="WITH_DELAY">FALSE</field>
+        <value name="VALUE">
+          <block type="logic_boolean" id="bool_false">
+            <field name="BOOL">FALSE</field>
+          </block>
+        </value>
+      </block>
+    </statement>
+  </block>
+</xml>

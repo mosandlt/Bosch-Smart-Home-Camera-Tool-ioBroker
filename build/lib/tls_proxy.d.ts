@@ -21,7 +21,9 @@
 export interface TlsProxyHandle {
     /** Local port the proxy is listening on */
     port: number;
-    /** Plain-RTSP URL clients should connect to */
+    /** Host the proxy is bound to (e.g. "127.0.0.1" or "0.0.0.0") */
+    bindHost: string;
+    /** Plain-RTSP URL clients should connect to (sans credentials) */
     localRtspUrl: string;
     /** Stop the proxy (close server + all in-flight connections) */
     stop(): Promise<void>;
@@ -36,6 +38,20 @@ export interface TlsProxyOptions {
     cameraId: string;
     /** Bound local port (0 = pick free port, returned in handle.port) */
     localPort?: number;
+    /**
+     * Host to bind the listener to.
+     * Default "127.0.0.1" — only the local ioBroker host can connect.
+     * Set to "0.0.0.0" (or a specific NIC IP) to expose to the LAN so an
+     * external recorder (BlueIris, Frigate) running on a different host can
+     * pull the stream. Forum #84538.
+     */
+    bindHost?: string;
+    /**
+     * Hostname / IP that should appear in the returned `localRtspUrl`.
+     * Defaults to `bindHost`. Set explicitly when binding 0.0.0.0 so the URL
+     * uses the ioBroker host's LAN IP instead of "0.0.0.0".
+     */
+    urlHost?: string;
     /**
      * Logger function — pass adapter's this.log.debug / info / warn / error.
      * Defaults to a no-op if omitted.

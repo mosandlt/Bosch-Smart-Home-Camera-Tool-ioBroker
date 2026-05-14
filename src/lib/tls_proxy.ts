@@ -27,7 +27,9 @@ import * as tls from "node:tls";
 export interface TlsProxyHandle {
     /** Local port the proxy is listening on */
     port: number;
-    /** Plain-RTSP URL clients should connect to */
+    /** Host the proxy is bound to (e.g. "127.0.0.1" or "0.0.0.0") */
+    bindHost: string;
+    /** Plain-RTSP URL clients should connect to (sans credentials) */
     localRtspUrl: string;
     /** Stop the proxy (close server + all in-flight connections) */
     stop(): Promise<void>;
@@ -43,6 +45,20 @@ export interface TlsProxyOptions {
     cameraId: string;
     /** Bound local port (0 = pick free port, returned in handle.port) */
     localPort?: number;
+    /**
+     * Host to bind the listener to.
+     * Default "127.0.0.1" — only the local ioBroker host can connect.
+     * Set to "0.0.0.0" (or a specific NIC IP) to expose to the LAN so an
+     * external recorder (BlueIris, Frigate) running on a different host can
+     * pull the stream. Forum #84538.
+     */
+    bindHost?: string;
+    /**
+     * Hostname / IP that should appear in the returned `localRtspUrl`.
+     * Defaults to `bindHost`. Set explicitly when binding 0.0.0.0 so the URL
+     * uses the ioBroker host's LAN IP instead of "0.0.0.0".
+     */
+    urlHost?: string;
     /**
      * Logger function — pass adapter's this.log.debug / info / warn / error.
      * Defaults to a no-op if omitted.
@@ -77,6 +93,8 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
             remotePort,
             cameraId,
             localPort = 0,
+            bindHost = "127.0.0.1",
+            urlHost,
             rejectUnauthorized = false,
         } = options;
 
@@ -194,14 +212,22 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
         });
 
         // ── Start listening ─────────────────────────────────────────────────
-        server.listen(localPort, "127.0.0.1", () => {
+        server.listen(localPort, bindHost, () => {
             const addr = server.address() as net.AddressInfo;
             const port = addr.port;
-            const localRtspUrl = `rtsp://127.0.0.1:${port}/rtsp_tunnel`;
+            // Pick the host that will be embedded in the public URL: explicit
+            // urlHost > bindHost (but never "0.0.0.0", which is unroutable).
+            const publicHost =
+                urlHost && urlHost.length > 0
+                    ? urlHost
+                    : bindHost === "0.0.0.0"
+                      ? "127.0.0.1"
+                      : bindHost;
+            const localRtspUrl = `rtsp://${publicHost}:${port}/rtsp_tunnel`;
 
             log(
                 "info",
-                `TLS proxy for ${camLabel} started on 127.0.0.1:${port}` +
+                `TLS proxy for ${camLabel} started on ${bindHost}:${port}` +
                     ` -> ${remoteHost}:${remotePort}`,
             );
 
@@ -229,7 +255,7 @@ export function startTlsProxy(options: TlsProxyOptions): Promise<TlsProxyHandle>
                 });
             }
 
-            resolve({ port, localRtspUrl, stop });
+            resolve({ port, bindHost, localRtspUrl, stop });
         });
     });
 }

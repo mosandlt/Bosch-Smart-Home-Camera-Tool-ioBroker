@@ -34,7 +34,7 @@
  *   FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
  *
  * Firebase config (Android, "bosch-smart-cameras" project) — public app identifiers
- * embedded in every Bosch Smart Camera APK, confirmed by Bosch.
+ * embedded in every Bosch Smart Camera APK, vendor-confirmed for OSS use (2026-04-20).
  */
 
 import { EventEmitter } from "node:events";
@@ -57,8 +57,8 @@ export const FCM_ANDROID_APP_ID = `1:${FCM_SENDER_ID}:android:9e5b6b58e4c70075`;
 // Firebase project ID — Bosch Smart Camera Firebase project
 const FCM_PROJECT_ID = "bosch-smart-cameras";
 
-// Official Bosch OSS Firebase API key — OSS-vetted (2026-04-20).
-// Firebase Installations API + FCM registration permissions confirmed by Bosch.
+// Vendor-sanctioned OSS Firebase API key (2026-04-20).
+// Firebase Installations API + FCM registration permissions confirmed for OSS use.
 // Single key for both iOS and Android registration paths (one project, one key).
 // Stored base64-wrapped so GitHub Secret Scanning doesn't flag the public key;
 // decoded once at module load — no runtime overhead.

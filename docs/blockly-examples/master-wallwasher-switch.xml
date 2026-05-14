@@ -1,0 +1,80 @@
+<!--
+  Master Wallwasher Switch
+  ========================
+  Drives the wallwasher of every camera from a single virtual datapoint.
+
+  Setup:
+    1. Create 0_userdata.0.master_wallwasher (boolean, role switch.light) once.
+    2. Replace the four <CAM_UUID_N> placeholders below with your actual
+       camera IDs (Objects tab → bosch-smart-home-camera.0.cameras.<UUID>).
+       Remove the extra blocks if you have fewer cameras.
+    3. Save + Run the script.
+
+  Usage:
+    Toggle 0_userdata.0.master_wallwasher in any view, all four wallwashers
+    flip in lock-step. Front lights stay untouched.
+-->
+<xml xmlns="https://developers.google.com/blockly/xml">
+  <block type="on_ext" id="trigger" x="0" y="0">
+    <mutation items="1"></mutation>
+    <field name="CONDITION">ne</field>
+    <field name="ACK_CONDITION"></field>
+    <value name="OID0">
+      <shadow type="field_oid">
+        <field name="oid">0_userdata.0.master_wallwasher</field>
+      </shadow>
+    </value>
+    <statement name="STATEMENT">
+      <block type="control" id="ctrl_cam1">
+        <mutation delay_input="false"></mutation>
+        <field name="OID">bosch-smart-home-camera.0.cameras.&lt;CAM_UUID_1&gt;.wallwasher_enabled</field>
+        <field name="WITH_DELAY">FALSE</field>
+        <value name="VALUE">
+          <block type="get_value" id="getval_1">
+            <field name="ATTR">val</field>
+            <field name="OID">0_userdata.0.master_wallwasher</field>
+          </block>
+        </value>
+        <next>
+          <block type="control" id="ctrl_cam2">
+            <mutation delay_input="false"></mutation>
+            <field name="OID">bosch-smart-home-camera.0.cameras.&lt;CAM_UUID_2&gt;.wallwasher_enabled</field>
+            <field name="WITH_DELAY">FALSE</field>
+            <value name="VALUE">
+              <block type="get_value" id="getval_2">
+                <field name="ATTR">val</field>
+                <field name="OID">0_userdata.0.master_wallwasher</field>
+              </block>
+            </value>
+            <next>
+              <block type="control" id="ctrl_cam3">
+                <mutation delay_input="false"></mutation>
+                <field name="OID">bosch-smart-home-camera.0.cameras.&lt;CAM_UUID_3&gt;.wallwasher_enabled</field>
+                <field name="WITH_DELAY">FALSE</field>
+                <value name="VALUE">
+                  <block type="get_value" id="getval_3">
+                    <field name="ATTR">val</field>
+                    <field name="OID">0_userdata.0.master_wallwasher</field>
+                  </block>
+                </value>
+                <next>
+                  <block type="control" id="ctrl_cam4">
+                    <mutation delay_input="false"></mutation>
+                    <field name="OID">bosch-smart-home-camera.0.cameras.&lt;CAM_UUID_4&gt;.wallwasher_enabled</field>
+                    <field name="WITH_DELAY">FALSE</field>
+                    <value name="VALUE">
+                      <block type="get_value" id="getval_4">
+                        <field name="ATTR">val</field>
+                        <field name="OID">0_userdata.0.master_wallwasher</field>
+                      </block>
+                    </value>
+                  </block>
+                </next>
+              </block>
+            </next>
+          </block>
+        </next>
+      </block>
+    </statement>
+  </block>
+</xml>

@@ -65,7 +65,11 @@ const session_watchdog_1 = require("./lib/session_watchdog");
 const snapshot_1 = require("./lib/snapshot");
 const tls_proxy_1 = require("./lib/tls_proxy");
 const fcm_1 = require("./lib/fcm");
+const alarm_light_1 = require("./lib/alarm_light");
 // ── Adapter class ─────────────────────────────────────────────────────────────
+/**
+ *
+ */
 class BoschSmartHomeCamera extends utils.Adapter {
     /** setTimeout handle for the token refresh re-arm loop (ioBroker.Timeout | null). */
     _refreshTimeout = null;
@@ -94,6 +98,13 @@ class BoschSmartHomeCamera extends utils.Adapter {
      */
     _imageRotation = {};
     /**
+     * Stream-quality preference per camera ID. v0.5.0 — controls the
+     * `highQualityVideo` flag in PUT /v11/video_inputs/{id}/connection.
+     * Default "high" (full bitrate). Changing this state forces the next
+     * ensureLiveSession() to re-open with the new flag.
+     */
+    _streamQuality = new Map();
+    /**
      * ISO timestamp of the latest processed event per camera.
      * Used by fetchAndProcessEvents() to skip events we've already seen.
      * Keyed by camera ID. float('-inf') equivalent → empty string means "not seen".
@@ -115,6 +126,49 @@ class BoschSmartHomeCamera extends utils.Adapter {
     _eventPollTimer = null;
     /** Event-poll interval (ms) when FCM push is unavailable. */
     static EVENT_POLL_INTERVAL_MS = 30_000;
+    /**
+     * Periodic poll of /v11/video_inputs to pick up app-side state changes
+     * (privacy toggled via the Bosch app, camera renamed, …). Independent of
+     * FCM — runs always so DPs stay accurate even with push healthy.
+     * Forum #84538: user set privacy_enabled via ioBroker, toggled it off
+     * via the app, ioBroker DP stayed `true` because we only fetched once.
+     */
+    _statePollTimer = null;
+    /** Camera-state poll interval (ms). */
+    static STATE_POLL_INTERVAL_MS = 30_000;
+    /**
+     * Sticky TLS-proxy port per camera ID. Set on first proxy start
+     * (ephemeral free port from the OS), then reused across session renewals
+     * and adapter restarts so external recorders (BlueIris) keep working
+     * without re-configuring the URL on every hourly session renewal.
+     */
+    _stickyProxyPort = new Map();
+    /**
+     * Remembered upstream LAN address (`<ip>:<port>`) per camera. Used by
+     * `upsertSession()` to decide whether a renewed Bosch session points at
+     * the same camera (→ keep the proxy + port intact) or at a different
+     * address (→ tear down + restart).
+     */
+    _sessionRemote = new Map();
+    /**
+     * Desired siren (panic_alarm) state per Gen2 camera. The Bosch cloud has
+     * no GET for this state — the iOS/Android apps keep their own copy and
+     * we do the same. Wiped on adapter restart (camera also auto-stops the
+     * siren after a hardware-defined timeout, so a stale `true` is fine to
+     * forget).
+     */
+    _sirenState = new Map();
+    /**
+     * Cached lighting state per Gen2 camera (frontLight + topLed + bottomLed
+     * brightness/color/whiteBalance). Seeded by the state-poll GET on the
+     * `/lighting/switch` endpoint and updated from every PUT response. Used
+     * to merge incremental DP writes into the full body Bosch requires.
+     */
+    _lightingCache = new Map();
+    /**
+     *
+     * @param options
+     */
     constructor(options = {}) {
         super({
             ...options,
@@ -390,6 +444,62 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 },
                 native: {},
             });
+            // v0.5.1: integrated 75 dB siren (Gen2 only). Backed by
+            // PUT /v11/video_inputs/{id}/panic_alarm body {"status": "ON"|"OFF"} (204).
+            // Stateful — siren keeps blaring until OFF is sent. The Bosch
+            // cloud has no GET for this state, so the DP reflects the
+            // adapter's last write (cleared on restart).
+            if (cam.generation >= 2) {
+                await this.setObjectNotExistsAsync(`${prefix}.siren_active`, {
+                    type: "state",
+                    common: {
+                        name: "Siren (75 dB panic alarm) — write true to trigger, false to silence",
+                        role: "switch",
+                        type: "boolean",
+                        read: true,
+                        write: true,
+                        def: false,
+                    },
+                    native: {},
+                });
+            }
+            // v0.5.1: Gen2 RGB lighting (Eyes Outdoor II + Indoor II) — backed
+            // by PUT /v11/video_inputs/{id}/lighting/switch. The user-facing
+            // "wallwasher" concept maps to top+bottom LED groups together
+            // (front spotlight has white-balance only, no RGB).
+            //   wallwasher_color      — string  "#RRGGBB" or "" (= white-balance)
+            //   wallwasher_brightness — number  0..100
+            // Gated on featureSupport.light so cams without the multi-LED rig
+            // don't get useless DPs.
+            if (cam.generation >= 2 && cam.featureLight === true) {
+                await this.setObjectNotExistsAsync(`${prefix}.wallwasher_color`, {
+                    type: "state",
+                    common: {
+                        name: "Wallwasher RGB colour (Gen2 top+bottom LEDs) — HEX, empty = white",
+                        role: "level.color.rgb",
+                        type: "string",
+                        read: true,
+                        write: true,
+                        def: "",
+                    },
+                    native: {},
+                });
+                await this.setObjectNotExistsAsync(`${prefix}.wallwasher_brightness`, {
+                    type: "state",
+                    common: {
+                        name: "Wallwasher brightness (Gen2 top+bottom LEDs) 0..100",
+                        role: "level.brightness",
+                        type: "number",
+                        min: 0,
+                        max: 100,
+                        unit: "%",
+                        read: true,
+                        write: true,
+                        def: 0,
+                    },
+                    native: {},
+                });
+            }
             // Indoor-only in practice — created for all cameras; can be filtered later by generation/hardwareVersion
             await this.setObjectNotExistsAsync(`${prefix}.image_rotation_180`, {
                 type: "state",
@@ -419,10 +529,16 @@ class BoschSmartHomeCamera extends utils.Adapter {
             // inject a motion event so automations listening for Bosch motion fire
             // without waiting for the real Bosch FCM push.
             // Forum reference: ioBroker forum #84538 (Jaschkopf).
+            //
+            // IMPORTANT: this only updates ioBroker DPs (`last_motion_at`,
+            // `last_motion_event_type`). It does NOT cause a recording in the
+            // Bosch app — the camera's cloud-side motion engine decides when
+            // to record and we have no API to inject that. Forum #84538 post 10.
             await this.setObjectNotExistsAsync(`${prefix}.motion_trigger`, {
                 type: "state",
                 common: {
-                    name: "Inject synthetic motion event (write true to trigger)",
+                    name: "Inject synthetic motion event for ioBroker automations " +
+                        "(updates last_motion_at — does NOT create a Bosch-app recording)",
                     role: "button",
                     type: "boolean",
                     read: false,
@@ -469,6 +585,26 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     read: true,
                     write: false,
                     def: "",
+                },
+                native: {},
+            });
+            // v0.5.0: stream quality preference. Toggling this state closes the
+            // current LOCAL session and opens a new one with the matching
+            // highQualityVideo flag — useful for mobile dashboards / metered
+            // links where the full-bitrate primary stream wastes bandwidth.
+            await this.setObjectNotExistsAsync(`${prefix}.stream_quality`, {
+                type: "state",
+                common: {
+                    name: "Stream quality: high (full bitrate) / low (bandwidth saver)",
+                    role: "level.mode",
+                    type: "string",
+                    read: true,
+                    write: true,
+                    def: "high",
+                    states: {
+                        high: "High (full bitrate)",
+                        low: "Low (bandwidth saver)",
+                    },
                 },
                 native: {},
             });
@@ -608,7 +744,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
             throw new Error(`Cannot open live session for ${camId} — no access token`);
         }
         // Open a fresh LOCAL session — throws if camera unreachable on LAN
-        const session = await (0, live_session_1.openLiveSession)(this._httpClient, this._currentAccessToken, camId);
+        const highQuality = (this._streamQuality.get(camId) ?? "high") === "high";
+        const session = await (0, live_session_1.openLiveSession)(this._httpClient, this._currentAccessToken, camId, highQuality);
         this._liveSessions.set(camId, session);
         // Spawn (or replace) TLS proxy + update stream_url + arm watchdog
         await this.upsertSession(camId, session);
@@ -619,7 +756,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     if (!this._currentAccessToken) {
                         return Promise.reject(new Error(`Cannot renew session for ${camId} — no access token`));
                     }
-                    return (0, live_session_1.openLiveSession)(this._httpClient, this._currentAccessToken, camId);
+                    const hq = (this._streamQuality.get(camId) ?? "high") === "high";
+                    return (0, live_session_1.openLiveSession)(this._httpClient, this._currentAccessToken, camId, hq);
                 },
                 onRenew: async (newSession) => {
                     this._liveSessions.set(camId, newSession);
@@ -648,31 +786,109 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * Spawn (or replace) the TLS proxy for the given session and update stream_url.
      * Extracted so both ensureLiveSession and the watchdog onRenew callback can reuse it.
      *
+     * Two forum-driven behaviours (issue #84538):
+     *   - **Sticky port**: on first run the OS picks a free ephemeral port; we
+     *     persist it (`_stickyProxyPort` + state `cameras.<id>._proxy_port`)
+     *     and reuse it on every renewal / adapter restart so an external
+     *     recorder (BlueIris) keeps the same URL. Falls back to a new
+     *     ephemeral port if the old one is taken (e.g. another process).
+     *   - **Credentials in URL**: Bosch's RTSP endpoint demands Digest auth;
+     *     embed `user:password@host:port` so the recorder can authenticate
+     *     without a separate config step.
+     *
      * @param camId    Camera UUID
      * @param session  Freshly opened LiveSession (always LOCAL)
      */
     async upsertSession(camId, session) {
         try {
-            const existingProxy = this._tlsProxies.get(camId);
-            if (existingProxy) {
-                await existingProxy.stop().catch(() => undefined);
-                this._tlsProxies.delete(camId);
-            }
             // lanAddress: "192.168.x.x:443" — always LOCAL
             const [h, pStr] = session.lanAddress.split(":");
             const remoteHost = h;
             const remotePort = parseInt(pStr ?? "443", 10);
-            const proxyHandle = await (0, tls_proxy_1.startTlsProxy)({
-                remoteHost,
-                remotePort,
-                cameraId: camId,
-                log: (level, msg) => this.log[level](msg),
-            });
-            this._tlsProxies.set(camId, proxyHandle);
+            // ── Hot-reuse: same upstream + alive proxy → just refresh stream_url
+            // with the new Digest credentials. Keeps port stable across renewals.
+            const existingProxy = this._tlsProxies.get(camId);
+            const existingRemote = this._sessionRemote.get(camId);
+            const remoteUnchanged = existingRemote === `${remoteHost}:${remotePort}`;
+            let proxyHandle;
+            if (existingProxy && remoteUnchanged) {
+                proxyHandle = existingProxy;
+                this.log.debug(`TLS proxy for ${camId.slice(0, 8)}: reusing port ${proxyHandle.port} ` +
+                    `(remote unchanged ${remoteHost}:${remotePort})`);
+            }
+            else {
+                if (existingProxy) {
+                    await existingProxy.stop().catch(() => undefined);
+                    this._tlsProxies.delete(camId);
+                }
+                // Sticky-port: prefer the previously used port if known
+                let preferredPort = this._stickyProxyPort.get(camId);
+                if (preferredPort === undefined) {
+                    const persisted = await this.getStateAsync(`cameras.${camId}._proxy_port`);
+                    const v = persisted?.val;
+                    if (typeof v === "number" && v > 0 && v < 65_536) {
+                        preferredPort = v;
+                    }
+                }
+                const { bindHost, urlHost } = this._rtspBindConfig();
+                try {
+                    proxyHandle = await (0, tls_proxy_1.startTlsProxy)({
+                        remoteHost,
+                        remotePort,
+                        cameraId: camId,
+                        localPort: preferredPort,
+                        bindHost,
+                        urlHost,
+                        log: (level, msg) => this.log[level](msg),
+                    });
+                }
+                catch (bindErr) {
+                    // Sticky port no longer available — fall back to ephemeral
+                    const msg = bindErr instanceof Error ? bindErr.message : String(bindErr);
+                    if (preferredPort !== undefined) {
+                        this.log.warn(`TLS proxy for ${camId.slice(0, 8)}: sticky port ${preferredPort} ` +
+                            `unavailable (${msg}) — falling back to ephemeral port`);
+                        proxyHandle = await (0, tls_proxy_1.startTlsProxy)({
+                            remoteHost,
+                            remotePort,
+                            cameraId: camId,
+                            bindHost,
+                            urlHost,
+                            log: (level, msg2) => this.log[level](msg2),
+                        });
+                    }
+                    else {
+                        throw bindErr;
+                    }
+                }
+                this._tlsProxies.set(camId, proxyHandle);
+                this._sessionRemote.set(camId, `${remoteHost}:${remotePort}`);
+                this._stickyProxyPort.set(camId, proxyHandle.port);
+                // Persist sticky port so it survives adapter restart
+                await this.setObjectNotExistsAsync(`cameras.${camId}._proxy_port`, {
+                    type: "state",
+                    common: {
+                        name: "Sticky TLS proxy port (auto-managed)",
+                        role: "value",
+                        type: "number",
+                        read: true,
+                        write: false,
+                        def: 0,
+                    },
+                    native: {},
+                });
+                await this.upsertState(`cameras.${camId}._proxy_port`, proxyHandle.port);
+            }
+            // Build the public URL with Digest credentials + RTSP query params.
+            // Bosch RTSP demands Digest auth; without `user:pass@…` consumers
+            // (cameras adapter, BlueIris, FFmpeg without separate auth) return
+            // "401 Unauthorized". The query params mirror what HA / Python CLI
+            // build: inst=1 (instance), enableaudio=1, fmtp=1, maxSessionDuration.
+            const credsUrl = this._buildStreamUrl(proxyHandle, session);
             await this.setObjectNotExistsAsync(`cameras.${camId}.stream_url`, {
                 type: "state",
                 common: {
-                    name: "Local RTSP URL for RTSPS stream",
+                    name: "Local RTSP URL (with Digest creds) for the RTSPS stream",
                     role: "text.url",
                     type: "string",
                     read: true,
@@ -681,15 +897,56 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 },
                 native: {},
             });
-            await this.upsertState(`cameras.${camId}.stream_url`, proxyHandle.localRtspUrl);
+            await this.upsertState(`cameras.${camId}.stream_url`, credsUrl);
             this.log.info(`TLS proxy for camera ${camId.slice(0, 8)}: ` +
-                `stream_url = ${proxyHandle.localRtspUrl}`);
+                `stream_url = ${this._maskCreds(credsUrl)}`);
         }
         catch (proxyErr) {
             // TLS proxy failure is non-fatal for RCP/snapshot — log and continue
             const msg = proxyErr instanceof Error ? proxyErr.message : String(proxyErr);
             this.log.warn(`Could not start TLS proxy for ${camId}: ${msg}`);
         }
+    }
+    /**
+     * Resolve the RTSP proxy bind host + URL host from adapter config.
+     * Default: bind 127.0.0.1, URL uses 127.0.0.1 (legacy behaviour).
+     * `rtsp_expose_to_lan=true` → bind 0.0.0.0, URL uses `rtsp_external_host`
+     * (falls back to 127.0.0.1 if the field is empty — that still works for
+     * tools running on the ioBroker host, just not for LAN recorders).
+     */
+    _rtspBindConfig() {
+        const exposeLan = this.config.rtsp_expose_to_lan === true;
+        if (!exposeLan) {
+            return { bindHost: "127.0.0.1", urlHost: "127.0.0.1" };
+        }
+        const ext = typeof this.config.rtsp_external_host === "string"
+            ? this.config.rtsp_external_host.trim()
+            : "";
+        return { bindHost: "0.0.0.0", urlHost: ext || "127.0.0.1" };
+    }
+    /**
+     * Build the public RTSP URL with embedded Digest credentials and the
+     * query params Bosch cameras expect (inst, enableaudio, fmtp,
+     * maxSessionDuration). Mirrors the HA integration's `local_rtsp_url`
+     * shape in __init__.py.
+     *
+     * @param proxy
+     * @param session
+     */
+    _buildStreamUrl(proxy, session) {
+        const u = encodeURIComponent(session.digestUser);
+        const p = encodeURIComponent(session.digestPassword);
+        const base = proxy.localRtspUrl.replace("rtsp://", `rtsp://${u}:${p}@`);
+        const dur = session.maxSessionDuration > 0 ? session.maxSessionDuration : 3600;
+        return `${base}?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=${dur}`;
+    }
+    /**
+     * Replace `user:password@` with `***:***@` for log lines.
+     *
+     * @param url
+     */
+    _maskCreds(url) {
+        return url.replace(/(rtsp:\/\/)([^@/]+)@/, "$1***:***@");
     }
     // ── PKCE browser-login helpers ──────────────────────────────────────────
     /**
@@ -902,6 +1159,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
         for (const cam of cameras) {
             this._cameras.set(cam.id, cam);
         }
+        // Hydrate runtime preference maps from persisted states so user-set
+        // values survive adapter restarts (states themselves are ioBroker-persisted,
+        // but the in-memory shadow maps are reset on every onReady).
+        for (const cam of cameras) {
+            const qState = await this.getStateAsync(`cameras.${cam.id}.stream_quality`);
+            const q = typeof qState?.val === "string" ? qState.val : "high";
+            this._streamQuality.set(cam.id, q === "low" ? "low" : "high");
+        }
         // Subscribe to all camera states so onStateChange receives user writes
         await this.subscribeStatesAsync("cameras.*");
         // ── Step 4: Mark connected + arm refresh loop ──────────────────────
@@ -980,7 +1245,99 @@ class BoschSmartHomeCamera extends utils.Adapter {
             }
             // Don't crash — adapter still usable without push (polling fallback)
         }
+        // ── Step 6: Periodic camera-state poll (privacy + future fields) ────
+        // Even with FCM push healthy we need this — Bosch never pushes a
+        // privacy-toggle event, so app-side privacy changes only surface via
+        // the next GET /v11/video_inputs. Forum #84538.
+        this._startStatePolling();
         this.log.info(`Bosch Smart Home Camera adapter ready — ${cameras.length} camera(s) active`);
+    }
+    /**
+     * Periodic refetch of `/v11/video_inputs` to mirror app-side state changes
+     * (privacy, in the future also name / firmware) into ioBroker DPs.
+     *
+     * Designed to be cheap — single GET, ~1–2 kB JSON per call, 30 s cadence.
+     * Idempotent: re-calling while a timer is already armed is a no-op.
+     * Stops itself on token expiry; the token-refresh loop will re-arm.
+     */
+    _startStatePolling() {
+        if (this._statePollTimer) {
+            return;
+        }
+        const timer = setInterval(() => {
+            void this._pollCameraStateOnce().catch((err) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.log.debug(`Camera state poll tick failed: ${msg}`);
+            });
+        }, BoschSmartHomeCamera.STATE_POLL_INTERVAL_MS);
+        timer.unref();
+        this._statePollTimer = timer;
+    }
+    /**
+     * Single tick of the state poll: GET /v11/video_inputs, sync per-camera
+     * fields that exist in that response back to DPs (currently just
+     * privacy_enabled; light fields live on /lighting and aren't polled).
+     */
+    async _pollCameraStateOnce() {
+        const token = this._currentAccessToken;
+        if (!token) {
+            // Token refresh in flight — skip; next tick will retry
+            return;
+        }
+        let cameras;
+        try {
+            cameras = await (0, cameras_1.fetchCameras)(this._httpClient, token);
+        }
+        catch (err) {
+            if (err instanceof cameras_1.UnauthorizedError) {
+                // Let the refresh loop handle it — don't fight here
+                this.log.debug("State poll: 401 — token refresh will recover");
+                return;
+            }
+            throw err;
+        }
+        for (const cam of cameras) {
+            // Refresh the in-memory metadata cache too (so generation/name stays
+            // current after a Bosch-app rename)
+            this._cameras.set(cam.id, cam);
+            if (cam.privacyMode !== undefined) {
+                const desired = cam.privacyMode === "ON";
+                // Only write when changed — upsertState already dedupes, but a
+                // log line per camera every 30 s would be noisy.
+                const current = await this.getStateAsync(`cameras.${cam.id}.privacy_enabled`);
+                if (current?.val !== desired) {
+                    await this.upsertState(`cameras.${cam.id}.privacy_enabled`, desired);
+                    this.log.debug(`State poll: ${cam.id.slice(0, 8)} privacy ` +
+                        `${current?.val ? "ON" : "OFF"} → ${desired ? "ON" : "OFF"} (from cloud)`);
+                }
+            }
+            // ── Gen2 lighting/switch — seed cache + sync wallwasher DPs ────────
+            // /lighting/switch is a separate endpoint (not in /v11/video_inputs),
+            // so we fetch it per-camera. Only Gen2 cams with featureSupport.light
+            // get this path — Gen1 has no RGB hardware.
+            if (cam.generation >= 2 && cam.featureLight === true) {
+                const ls = await (0, alarm_light_1.fetchLightingState)(this._httpClient, token, cam.id);
+                if (ls) {
+                    this._lightingCache.set(cam.id, ls);
+                    // Mirror wallwasher (top+bottom LED) into DPs. Use the
+                    // brighter of the two groups as the displayed brightness;
+                    // colour follows the top LED (they're driven together by
+                    // wallwasher writes anyway).
+                    const top = ls.topLedLightSettings;
+                    const bot = ls.bottomLedLightSettings;
+                    const brightness = Math.max(top.brightness, bot.brightness);
+                    const color = top.color ?? bot.color ?? "";
+                    const curBr = await this.getStateAsync(`cameras.${cam.id}.wallwasher_brightness`);
+                    if (curBr?.val !== brightness) {
+                        await this.upsertState(`cameras.${cam.id}.wallwasher_brightness`, brightness);
+                    }
+                    const curCol = await this.getStateAsync(`cameras.${cam.id}.wallwasher_color`);
+                    if (curCol?.val !== color) {
+                        await this.upsertState(`cameras.${cam.id}.wallwasher_color`, color);
+                    }
+                }
+            }
+        }
     }
     /**
      * Called whenever a subscribed state changes.
@@ -1064,6 +1421,24 @@ class BoschSmartHomeCamera extends utils.Adapter {
                         await this.setStateAsync(id, false, true);
                     }
                     return; // skip generic ack below
+                case "stream_quality":
+                    await this.handleStreamQualityChange(camId, String(state.val));
+                    break;
+                case "siren_active":
+                    await this.handleSirenToggle(camId, Boolean(state.val));
+                    break;
+                case "wallwasher_color":
+                    await this.handleWallwasherUpdate(camId, {
+                        color: typeof state.val === "string" ? state.val : "",
+                    });
+                    break;
+                case "wallwasher_brightness":
+                    await this.handleWallwasherUpdate(camId, {
+                        brightness: typeof state.val === "number"
+                            ? state.val
+                            : parseInt(String(state.val), 10),
+                    });
+                    break;
                 default:
                     return; // unknown writable state — no-op
             }
@@ -1096,6 +1471,12 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * so downstream automations that listen for Bosch motion states fire immediately
      * without waiting for the real Bosch FCM push.
      *
+     * Scope: ioBroker-local only. This DOES NOT cause a recording in the
+     * Bosch cloud / Bosch app — the camera's own motion engine decides when
+     * to record, and Bosch exposes no API to inject a recording externally.
+     * Use this for ioBroker-side scenes/automations (light, scene, push),
+     * not as a remote "record now" trigger. Forum #84538 post 10.
+     *
      * Forum reference: ioBroker forum #84538 (Jaschkopf — Philips Hue in driveway).
      *
      * @param camId      Camera UUID
@@ -1107,6 +1488,128 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.setStateAsync(`${prefix}.last_motion_at`, ts, true);
         await this.setStateAsync(`${prefix}.last_motion_event_type`, eventType, true);
         this.log.info(`Synthetic ${eventType} trigger for camera ${camId.slice(0, 8)}`);
+    }
+    /**
+     * Trigger / silence the Gen2 panic-alarm siren.
+     *
+     * PUT /v11/video_inputs/{id}/panic_alarm body {"status": "ON"|"OFF"} → 204.
+     * Stateful — the camera keeps blaring until OFF is sent (or its hardware
+     * timeout fires, which Bosch hasn't documented; observed ~3 min).
+     *
+     * @param camId    Camera UUID (must be Gen2)
+     * @param enabled  true → trigger siren, false → silence
+     */
+    async handleSirenToggle(camId, enabled) {
+        const cam = this._cameras.get(camId);
+        if (!cam || cam.generation < 2) {
+            this.log.warn(`Siren request for ${camId.slice(0, 8)} ignored — not a Gen2 camera`);
+            throw new Error("siren not supported on this camera");
+        }
+        if (!this._currentAccessToken) {
+            throw new Error("no access token — adapter not ready");
+        }
+        const ok = await (0, alarm_light_1.setPanicAlarm)(this._httpClient, this._currentAccessToken, camId, enabled);
+        if (!ok) {
+            throw new Error(`PUT /panic_alarm returned non-success for ${camId.slice(0, 8)}`);
+        }
+        this._sirenState.set(camId, enabled);
+        this.log.info(`Siren ${enabled ? "TRIGGERED" : "stopped"} for camera ${camId.slice(0, 8)}`);
+    }
+    /**
+     * Apply a wallwasher (top + bottom LED) update to a Gen2 camera.
+     *
+     * The Bosch lighting/switch endpoint requires the full body — caller
+     * passes only the delta and we merge into the cached state. If we have
+     * no cache yet (first call after start, before the state-poll tick has
+     * fetched), seed with `DEFAULT_LIGHTING_STATE` so the front spotlight
+     * isn't accidentally re-enabled.
+     *
+     * Empty-string colour switches the LEDs to white-balance mode (warm
+     * white). Use case: user clears the picker to "no colour".
+     *
+     * @param camId   Camera UUID (must be Gen2 with featureSupport.light)
+     * @param delta   {brightness?, color?}  — only the changed fields
+     */
+    async handleWallwasherUpdate(camId, delta) {
+        const cam = this._cameras.get(camId);
+        if (!cam || cam.generation < 2 || cam.featureLight !== true) {
+            this.log.warn(`Wallwasher request for ${camId.slice(0, 8)} ignored — Gen2 lighting not supported`);
+            throw new Error("wallwasher not supported on this camera");
+        }
+        if (!this._currentAccessToken) {
+            throw new Error("no access token — adapter not ready");
+        }
+        const current = this._lightingCache.get(camId) ?? alarm_light_1.DEFAULT_LIGHTING_STATE;
+        // Translate "" → null (white-balance), undefined → keep current
+        let colorArg;
+        if (delta.color === undefined) {
+            colorArg = undefined;
+        }
+        else if (delta.color === "") {
+            colorArg = null;
+        }
+        else {
+            colorArg = delta.color;
+        }
+        let brightnessArg;
+        if (delta.brightness !== undefined) {
+            brightnessArg = Number.isFinite(delta.brightness) ? delta.brightness : 0;
+        }
+        const next = (0, alarm_light_1.buildWallwasherUpdate)(current, brightnessArg, colorArg);
+        const result = await (0, alarm_light_1.putLightingState)(this._httpClient, this._currentAccessToken, camId, next);
+        if (!result) {
+            throw new Error(`PUT /lighting/switch returned non-success for ${camId.slice(0, 8)}`);
+        }
+        this._lightingCache.set(camId, result);
+        this.log.info(`Wallwasher update for camera ${camId.slice(0, 8)}: ` +
+            `top brightness=${result.topLedLightSettings.brightness} ` +
+            `color=${result.topLedLightSettings.color ?? "wb=" + result.topLedLightSettings.whiteBalance}`);
+    }
+    /**
+     * Switch the stream-quality preference for a camera and force a session
+     * re-open so the new highQualityVideo flag takes effect immediately.
+     *
+     * The Bosch Cloud API only honours `highQualityVideo` at the
+     * `PUT /v11/video_inputs/{id}/connection` call — it cannot be changed
+     * on a live session. So we close the existing session (via DELETE),
+     * drop the cached LiveSession, and let the next snapshot/stream call
+     * re-open with the new flag.
+     *
+     * @param camId
+     * @param quality  "high" or "low"
+     */
+    async handleStreamQualityChange(camId, quality) {
+        const normalised = quality === "low" ? "low" : "high";
+        const previous = this._streamQuality.get(camId) ?? "high";
+        if (previous === normalised) {
+            return; // no-op
+        }
+        this._streamQuality.set(camId, normalised);
+        this.log.info(`Stream quality for ${camId.slice(0, 8)}: ${previous} → ${normalised} ` +
+            `(closing session so next stream request re-opens with new flag)`);
+        // Close existing session so the next ensureLiveSession() picks up the
+        // new highQualityVideo flag. Best-effort — proxy stays serving the
+        // existing stream until the next renewal cycle.
+        if (this._liveSessions.has(camId)) {
+            if (this._currentAccessToken) {
+                try {
+                    await (0, live_session_1.closeLiveSession)(this._httpClient, this._currentAccessToken, camId);
+                }
+                catch (err) {
+                    // Best-effort — Bosch may already have closed it
+                    this.log.debug(`closeLiveSession during quality change for ${camId.slice(0, 8)}: ` +
+                        `${err instanceof Error ? err.message : String(err)}`);
+                }
+            }
+            this._liveSessions.delete(camId);
+        }
+        // Stop the watchdog too — the next ensureLiveSession() rebuilds it
+        // with the renewed maxSessionDuration for the new session.
+        const watchdog = this._sessionWatchdogs.get(camId);
+        if (watchdog) {
+            watchdog.stop();
+            this._sessionWatchdogs.delete(camId);
+        }
     }
     /**
      * Fetch fresh events for all known cameras from the Bosch Cloud API.
@@ -1258,7 +1761,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
             wallwasher: enabled,
         });
     }
-    /** Read a boolean state with default false (treats null/undefined/non-bool as false). */
+    /**
+     * Read a boolean state with default false (treats null/undefined/non-bool as false).
+     *
+     * @param id
+     */
     async _readBoolState(id) {
         const s = await this.getStateAsync(id);
         return s?.val === true;
@@ -1279,6 +1786,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
      *
      * @param camId
      * @param state
+     * @param state.frontLight
+     * @param state.wallwasher
      */
     async _applyLightingState(camId, state) {
         if (!this._currentAccessToken) {
@@ -1460,6 +1969,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 if (this._eventPollTimer) {
                     clearInterval(this._eventPollTimer);
                     this._eventPollTimer = null;
+                }
+                // Stop camera-state poll timer (always armed when adapter is healthy)
+                if (this._statePollTimer) {
+                    clearInterval(this._statePollTimer);
+                    this._statePollTimer = null;
                 }
                 // Stop FCM listener
                 if (this._fcmListener) {

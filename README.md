@@ -1,10 +1,21 @@
 # ioBroker.bosch-smart-home-camera
 
-ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360°, Gen2 Eyes Indoor II + Outdoor II) — alpha, but the core feature set is functional end-to-end.
+ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360°, Gen2 Eyes Indoor II + Outdoor II) — beta. The full core feature set is functional end-to-end and verified live against real hardware.
 
 See the [Home Assistant integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) for the mature reference implementation (v12.0.1, HA Quality Scale Platinum).
 
 ## Changelog
+
+### v0.5.1 (beta)
+Adds Gen2 siren + RGB wallwasher colour, plus the v0.5.0 forum-driven fixes:
+
+- **Siren** (Gen2 only): new `cameras.<id>.siren_active` boolean DP. Write `true` to trigger the integrated 75 dB siren (panic alarm), `false` to silence. Backed by `PUT /v11/video_inputs/{id}/panic_alarm` with `{status: "ON"|"OFF"}` — the same endpoint the official Bosch app uses.
+- **RGB wallwasher** (Gen2 outdoor with `featureSupport.light=true`, i.e. Eyes Außenkamera II): two new DPs — `cameras.<id>.wallwasher_color` (HEX `#RRGGBB`, empty string = warm white mode) and `cameras.<id>.wallwasher_brightness` (0…100). Drives both top and bottom LED groups in unison via `PUT /v11/video_inputs/{id}/lighting/switch`. The front spotlight stays untouched (controlled by `front_light_enabled` as before).
+- Privacy state now syncs back from the Bosch app: every 30 s the adapter refetches `/v11/video_inputs` and mirrors `privacyMode` into `cameras.<id>.privacy_enabled`. Previously, setting privacy via the app left the ioBroker DP stale (forum #84538).
+- `stream_url` now embeds Digest credentials and Bosch query params (`rtsp://<user>:<password>@host:port/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=…`) so external recorders (BlueIris, Frigate, `iobroker.cameras`) no longer get "401 Unauthorized" on connect.
+- TLS-proxy port is sticky across session renewals and adapter restarts (persisted in `cameras.<id>._proxy_port`). External recorders no longer need URL reconfiguration after each hourly Bosch session refresh.
+- New admin tab "RTSP / Stream": tickbox to bind the proxy to `0.0.0.0` (instead of `127.0.0.1`) plus an external-host field so the published URL uses the ioBroker host's LAN IP — required when BlueIris / Frigate runs on a separate machine.
+- Motion trigger DP description clarified: `motion_trigger` is for ioBroker-side automations only; it updates `last_motion_at` but does **not** make the Bosch app create a recording.
 
 ### v0.4.0
 - Light-datapoint split: `front_light_enabled` + `wallwasher_enabled` can now be controlled independently (e.g. a dusk sensor drives the wallwasher only, without touching the front spotlight)
@@ -17,7 +28,7 @@ FCM resilience + token refresh on startup. Single Bosch OSS Firebase API key, pe
 
 ## Status
 
-**Alpha (v0.4.0)** — verified live against 4 cameras (Gen1 + Gen2, FW 7.91.56 / 9.40.25) on a real ioBroker instance.
+**Beta (v0.5.1)** — verified live against 4 cameras (Gen1 + Gen2, FW 7.91.56 / 9.40.25) on a real ioBroker instance. Cloud API contracts confirmed against the iOS app via mitmproxy.
 
 What works:
 - Browser-based OAuth2 PKCE login via Bosch SingleKey ID (no programmatic password handling — captcha/MFA happen in the browser)
@@ -71,18 +82,46 @@ See [`docs/vis-2-example/README.md`](./docs/vis-2-example/README.md) for the
 walkthrough, including how to swap the camera UUIDs and how to wire go2rtc /
 HLS for low-latency live video instead of the default snapshot refresh.
 
+## Blockly examples
+
+Import-ready Blockly scripts for the most common automations live in
+[`docs/blockly-examples/`](./docs/blockly-examples/): master-wallwasher
+switch, dusk-driven auto-wallwasher via Astro, and a Philips-Hue-PIR →
+synthetic Bosch motion bridge. Open javascript adapter → Scripts → new
+Blockly → click the XML icon → paste. Replace `<CAM_UUID>` placeholders
+with your actual camera IDs from the Objects tab. See the folder's
+[README](./docs/blockly-examples/README.md) for details.
+
 Note on **live streaming in the browser**: no browser supports RTSP natively.
 The adapter publishes a per-camera `stream_url`
-(`rtsp://127.0.0.1:<port>/rtsp_tunnel`) via a local TLS proxy for use with
-ffmpeg / mpv / `iobroker.cameras` / go2rtc. For VIS itself, either use the
-snapshot refresh in the example dashboard or bridge via go2rtc → WebRTC/HLS.
+(`rtsp://<user>:<password>@127.0.0.1:<port>/rtsp_tunnel?…`) via a local TLS
+proxy for use with ffmpeg / mpv / `iobroker.cameras` / go2rtc. For VIS
+itself, either use the snapshot refresh in the example dashboard or bridge
+via go2rtc → WebRTC/HLS.
+
+### External recorders (BlueIris, Frigate)
+
+By default the proxy listens on `127.0.0.1` — reachable from the ioBroker
+host itself but not from another machine. To use a recorder on a separate
+host:
+
+1. Admin UI → "RTSP / Stream" tab → tick **Expose RTSP proxy to LAN**.
+2. Set **External hostname / LAN IP** to the ioBroker host's LAN IP, e.g.
+   `192.168.1.50`.
+3. Save → adapter restarts → `cameras.<id>.stream_url` becomes
+   `rtsp://<user>:<password>@192.168.1.50:<sticky-port>/rtsp_tunnel?…`.
+4. Copy that URL into BlueIris / Frigate / your recorder.
+
+The port is sticky across adapter restarts and Bosch session renewals
+(persisted in `cameras.<id>._proxy_port`) — set the URL in your recorder
+once and it keeps working.
 
 ## Roadmap
 
 | Version | Scope |
 | --- | --- |
-| v0.5.0 | Motion zones + privacy masks (read/write via `/v11/video_inputs/{id}/motion`) |
-| v0.6.0 | Mini-NVR: pre-roll ring buffer + local segment recording |
+| v0.6.0 | Motion zones + privacy masks (read via `/v11/video_inputs/{id}/motion`) |
+| v0.7.0 | Mini-NVR: pre-roll ring buffer + local segment recording |
 | v1.0.0 | VIS widget + feature parity with the HA integration |
 
 Image rotation (v0.3.0) is a client-side display flag — Bosch's Cloud API has no rotation endpoint and RCP+ `0x0810` WRITE returns HTTP 401 on Gen2 FW 9.40.25, mirroring the HA integration's approach.
@@ -143,7 +182,7 @@ npm run release major    # 0.3.0 → 1.0.0
 ### **WORK IN PROGRESS**
 
 ### 0.3.3 (2026-05-13)
-- Single Bosch OSS Firebase API key for both iOS and Android registration paths — retired APK-extracted keys
+- Single OSS Firebase API key for both iOS and Android registration paths — retired APK-extracted keys
 - FCM diagnostic logging: new `mode-failed` event surfaces HTTP status + URL + Google error message (replaces silent catch in `_tryStart`)
 - Polling fallback like the HA integration: when both modes fail `info.fcm_active="polling"` (not `error`) and `/v11/events` is polled every 30 s — adapter stays usable
 - Auto-snapshot per camera at adapter start so `cameras.<id>.online` flips from default `false` to real state immediately

@@ -12,6 +12,20 @@ declare global {
             redirect_url: string;
             /** Cloud region: "EU" | "US" */
             region: string;
+            /**
+             * Expose the per-camera TLS proxy to the LAN (bind 0.0.0.0).
+             * Default false — proxy listens on 127.0.0.1 only.
+             * Enable when an external recorder (BlueIris, Frigate, etc.)
+             * on a separate host needs to pull the stream. Forum #84538.
+             */
+            rtsp_expose_to_lan?: boolean;
+            /**
+             * Hostname / IP that the published `stream_url` should use when
+             * `rtsp_expose_to_lan` is on. Typically the ioBroker host's LAN
+             * IP, e.g. "192.168.1.50". Empty / unset → falls back to
+             * "127.0.0.1".
+             */
+            rtsp_external_host?: string;
         }
     }
 }

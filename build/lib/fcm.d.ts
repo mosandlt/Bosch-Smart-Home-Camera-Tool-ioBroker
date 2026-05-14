@@ -34,7 +34,7 @@
  *   FCM_IOS_APP_ID = "1:404630424405:ios:715aae2570e39faad9bddc"
  *
  * Firebase config (Android, "bosch-smart-cameras" project) — public app identifiers
- * embedded in every Bosch Smart Camera APK, confirmed by Bosch.
+ * embedded in every Bosch Smart Camera APK, vendor-confirmed for OSS use (2026-04-20).
  */
 import { EventEmitter } from "node:events";
 import type { AxiosInstance } from "axios";

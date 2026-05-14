@@ -1,0 +1,61 @@
+<!--
+  Hue PIR → Synthetic Bosch Motion Event
+  ======================================
+  Forwards a Philips Hue motion sensor's "presence detected" signal
+  into the Bosch adapter, so existing motion-driven scripts fire BEFORE
+  the Bosch camera itself notices the visitor.
+
+  Usage scenario:
+    A Hue outdoor sensor at the start of the driveway picks up someone
+    walking towards the house ~2 seconds before they enter the field of
+    view of the Bosch outdoor cam. This script injects a synthetic
+    "person" event into the Bosch state tree the instant the Hue sensor
+    triggers, so motion-driven automations (light on, snapshot, push)
+    fire earlier.
+
+  Setup:
+    1. Replace <HUE_SENSOR_ID> with your Hue presence sensor's datapoint
+       (typically hue.0.<bridge>.<sensor>.presence under iobroker.hue).
+    2. Replace <CAM_UUID> with the Bosch camera you want to pre-trigger.
+    3. Save + Run.
+
+  Note: the synthetic event uses eventType "person" by default — switch
+  the constant in the `text` block to "motion" or "audio_alarm" if you
+  want a different event class.
+-->
+<xml xmlns="https://developers.google.com/blockly/xml">
+  <block type="on_ext" id="hue_trigger" x="0" y="0">
+    <mutation items="1"></mutation>
+    <field name="CONDITION">true</field>
+    <field name="ACK_CONDITION"></field>
+    <value name="OID0">
+      <shadow type="field_oid">
+        <field name="oid">hue.0.&lt;HUE_SENSOR_ID&gt;.presence</field>
+      </shadow>
+    </value>
+    <statement name="STATEMENT">
+      <block type="control" id="set_event_type">
+        <mutation delay_input="false"></mutation>
+        <field name="OID">bosch-smart-home-camera.0.cameras.&lt;CAM_UUID&gt;.motion_trigger_event_type</field>
+        <field name="WITH_DELAY">FALSE</field>
+        <value name="VALUE">
+          <block type="text" id="txt_event">
+            <field name="TEXT">person</field>
+          </block>
+        </value>
+        <next>
+          <block type="control" id="fire_trigger">
+            <mutation delay_input="false"></mutation>
+            <field name="OID">bosch-smart-home-camera.0.cameras.&lt;CAM_UUID&gt;.motion_trigger</field>
+            <field name="WITH_DELAY">FALSE</field>
+            <value name="VALUE">
+              <block type="logic_boolean" id="bool_fire">
+                <field name="BOOL">TRUE</field>
+              </block>
+            </value>
+          </block>
+        </next>
+      </block>
+    </statement>
+  </block>
+</xml>
