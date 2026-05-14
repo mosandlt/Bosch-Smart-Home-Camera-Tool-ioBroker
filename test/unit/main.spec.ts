@@ -1092,7 +1092,11 @@ describe("main adapter — v0.2.0 command handlers", () => {
         expect(state?.val ?? false, "state value must be falsy on fresh install").to.equal(false);
     });
 
-    it("livestream OFF: startup snapshot tears down session — stream_url empty + closeLiveSession called", async () => {
+    it("livestream OFF: startup snapshot arms idle teardown (warm session, no immediate close)", async () => {
+        // v0.5.3 changed v0.5.2's "tear down immediately" to a 60 s idle
+        // timer so back-to-back snaps can reuse the warm session. Right
+        // after the startup snapshot we expect: proxy started, NO stop yet,
+        // NO closeLiveSession yet, stream_url populated, idle timer armed.
         const closeLiveSessionStub = sinon.stub().resolves(undefined);
         const tlsStopStub = sinon.stub().resolves(undefined);
         const startTlsProxyStub = sinon.stub().resolves({
@@ -1114,26 +1118,36 @@ describe("main adapter — v0.2.0 command handlers", () => {
 
         const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
 
-        // Snapshot must have opened the proxy at least once
+        // Proxy must have opened at least once during the startup snapshot
         expect(
             startTlsProxyStub.callCount,
             "startTlsProxy fired during the startup snapshot",
         ).to.be.greaterThanOrEqual(1);
-        // …but post-teardown must have stopped it and closed the Bosch session
+        // …but the idle timer hasn't fired yet → no teardown calls observable
         expect(
             tlsStopStub.callCount,
-            "TLS proxy stop() must run after snapshot when livestream=off",
-        ).to.be.greaterThanOrEqual(1);
+            "TLS proxy stop() must NOT run during the idle window",
+        ).to.equal(0);
         expect(
             closeLiveSessionStub.callCount,
-            "closeLiveSession must run after snapshot when livestream=off",
-        ).to.be.greaterThanOrEqual(1);
+            "closeLiveSession must NOT run during the idle window",
+        ).to.equal(0);
 
-        // stream_url must be empty after teardown — no consumer should see a stale URL
+        // stream_url stays populated for consumers within the warm window
         const streamUrl = db.getState(
             `${adapter.namespace}.cameras.${camId}.stream_url`,
         ) as ioBroker.State | undefined;
-        expect(streamUrl?.val ?? "", "stream_url must be empty when livestream=off").to.equal("");
+        expect(
+            (streamUrl?.val as string | undefined) ?? "",
+            "stream_url must be set during the idle window so a quick re-poll works",
+        ).to.match(/^rtsp:\/\//);
+
+        // Idle timer must be armed for this camera (introspect private state)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const idleTimers = (adapter as any)._snapshotIdleTimers as Map<string, unknown>;
+        expect(idleTimers.has(camId), "idle teardown timer armed after startup snapshot").to.equal(
+            true,
+        );
     });
 
     it("livestream_enabled=true opens session + populates stream_url", async () => {
@@ -1156,12 +1170,15 @@ describe("main adapter — v0.2.0 command handlers", () => {
         await adapter.readyHandler!();
         await flushAutoSnapshot();
 
-        // Reset before the user toggle so we count only the toggle's effect
-        startTlsProxyStub.resetHistory();
-        closeLiveSessionStub.resetHistory();
-
         const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
         const stateId = `${adapter.namespace}.cameras.${camId}.livestream_enabled`;
+
+        // After startup snapshot the session + proxy are still warm (v0.5.3
+        // idle keep-alive). The idle timer must therefore be armed BEFORE
+        // the user toggles livestream on; we verify the toggle cancels it.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const idleTimers = (adapter as any)._snapshotIdleTimers as Map<string, unknown>;
+        expect(idleTimers.has(camId), "idle timer armed after startup snap").to.equal(true);
 
         // User flips livestream ON
         await adapter.stateChangeHandler!(stateId, {
@@ -1172,10 +1189,19 @@ describe("main adapter — v0.2.0 command handlers", () => {
             from: "",
         });
 
-        // Session must have been opened → TLS proxy spawned → stream_url populated
+        // Idle timer must have been cancelled → session stays alive indefinitely
+        expect(
+            idleTimers.has(camId),
+            "idle timer cancelled when livestream goes ON",
+        ).to.equal(false);
+
+        // Proxy must have spawned at least once across the lifetime (could be
+        // from the startup snap; ensureLiveSession reuses the cached session
+        // when livestream goes ON within the keep-alive window — that's the
+        // optimisation, not a bug).
         expect(
             startTlsProxyStub.callCount,
-            "startTlsProxy fires when user enables livestream",
+            "TLS proxy spawned at least once (startup snap or livestream toggle)",
         ).to.be.greaterThanOrEqual(1);
         const streamUrl = db.getState(
             `${adapter.namespace}.cameras.${camId}.stream_url`,
@@ -1249,6 +1275,374 @@ describe("main adapter — v0.2.0 command handlers", () => {
             `${adapter.namespace}.cameras.${camId}.stream_url`,
         ) as ioBroker.State | undefined;
         expect(streamUrl?.val ?? "", "stream_url cleared after teardown").to.equal("");
+    });
+
+    // ── v0.5.3: post-snapshot session keep-alive (idle teardown timer) ─────────
+    //
+    // Bursts of snapshot_trigger writes (Card opens, automation polling) must
+    // reuse the warm Bosch session instead of paying PUT /v11/.../connection
+    // on every snap. After the last snap we wait SNAPSHOT_SESSION_IDLE_MS
+    // (60 s) before closing the session. Cancelled if the user enables
+    // livestream (session stays alive forever) and on adapter unload.
+
+    it("livestream OFF: two rapid snapshots reuse the warm session (openLiveSession called once)", async () => {
+        // openLiveSession is the LOCAL session opener — the PUT /connection
+        // call we want to amortise. fetchSnapshot is the cheap snap.jpg
+        // fetch through the warm proxy. Burst pattern: 2x snapshot_trigger
+        // back-to-back → 1x openLiveSession, 2x fetchSnapshot.
+        const openLiveSessionStub = sinon.stub().resolves({
+            cameraId: "EF791764-A48D-4F00-9B32-EF04BEB0DDA0",
+            proxyUrl: "https://192.0.2.10:443/snap.jpg?JpegSize=1206",
+            connectionType: "LOCAL" as const,
+            digestUser: "cbs-testuser",
+            digestPassword: "testpassword",
+            lanAddress: "192.0.2.10:443",
+            bufferingTimeMs: 500,
+            maxSessionDuration: 3600,
+            openedAt: Date.now(),
+        });
+        const fetchSnapshotStub = sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        const { adapter } = createAdapterWithMocks({
+            openLiveSession: openLiveSessionStub,
+            fetchSnapshot: fetchSnapshotStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot(); // ensure startup snap completes deterministically
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.snapshot_trigger`;
+
+        // Snap #1 — user-triggered, immediately after startup snap
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+        await flushAutoSnapshot();
+
+        // Snap #2 immediately after — must reuse the cached session
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+        await flushAutoSnapshot();
+
+        // Total JPEG fetches across lifetime: 1 startup + 2 user triggers = 3
+        expect(
+            fetchSnapshotStub.callCount,
+            "all 3 snaps (startup + 2 user-triggered) fetched the JPEG",
+        ).to.be.greaterThanOrEqual(3);
+        // …but openLiveSession (PUT /connection — the call we're amortising)
+        // must have run exactly once. The startup snap opens, the two
+        // follow-up snaps reuse the cached session within SESSION_TTL_MS.
+        expect(
+            openLiveSessionStub.callCount,
+            "openLiveSession (PUT /connection) called only once across the whole burst",
+        ).to.equal(1);
+    });
+
+    it("livestream OFF: idle teardown fires → closeLiveSession + stream_url cleared", async () => {
+        // Drive the timer manually instead of waiting 60 s in tests.
+        // _armSnapshotIdleTeardown set the timer; we simulate its firing
+        // by invoking _teardownStream directly (same as what the timer
+        // callback does).
+        const closeLiveSessionStub = sinon.stub().resolves(undefined);
+        const tlsStopStub = sinon.stub().resolves(undefined);
+        const startTlsProxyStub = sinon.stub().resolves({
+            port: 54321,
+            localRtspUrl: "rtsp://127.0.0.1:54321/rtsp_tunnel",
+            stop: tlsStopStub,
+        });
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            closeLiveSession: closeLiveSessionStub,
+            startTlsProxy: startTlsProxyStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // Simulate idle timer firing
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any)._teardownStream(camId);
+
+        expect(
+            tlsStopStub.callCount,
+            "TLS proxy stop() fires when idle teardown runs",
+        ).to.be.greaterThanOrEqual(1);
+        expect(
+            closeLiveSessionStub.callCount,
+            "closeLiveSession fires when idle teardown runs",
+        ).to.be.greaterThanOrEqual(1);
+        const streamUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url`,
+        ) as ioBroker.State | undefined;
+        expect(streamUrl?.val ?? "", "stream_url cleared after idle teardown").to.equal("");
+    });
+
+    it("livestream_enabled=true cancels the pending idle teardown timer", async () => {
+        const { adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // After the startup snapshot the idle timer must be armed
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const idleTimers = (adapter as any)._snapshotIdleTimers as Map<string, unknown>;
+        expect(idleTimers.has(camId), "idle timer armed after startup snapshot").to.equal(true);
+
+        // User flips livestream ON → idle timer must be cancelled
+        const stateId = `${adapter.namespace}.cameras.${camId}.livestream_enabled`;
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+
+        expect(
+            idleTimers.has(camId),
+            "idle timer cleared once livestream is on (session must stay forever)",
+        ).to.equal(false);
+    });
+
+    it("onUnload clears pending snapshot idle teardown timers", async () => {
+        const { adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const idleTimers = (adapter as any)._snapshotIdleTimers as Map<string, unknown>;
+        expect(idleTimers.has(camId), "precondition: timer armed after snapshot").to.equal(true);
+
+        // Trigger unload
+        if (adapter.unloadHandler) {
+            await new Promise<void>((resolve) => {
+                adapter.unloadHandler!(() => resolve());
+            });
+        }
+
+        expect(idleTimers.size, "all idle timers cleared on unload").to.equal(0);
+    });
+
+    // ── v0.5.3: motion-event side effects ──────────────────────────────────────
+    //
+    // FCM (and synthetic) motion events must:
+    //  1. set cameras.<id>.motion_active=true with a 90 s auto-clear timer
+    //  2. when auto_snapshot_on_motion!=false: fetch a fresh JPEG and
+    //     publish it as base64 in cameras.<id>.last_event_image
+    //  3. write a matching cameras.<id>.last_event_image_at timestamp
+
+    it("motion event sets motion_active=true and arms auto-clear timer", async () => {
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // Drive a synthetic motion event (same _onMotionFired path as FCM)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any).triggerSyntheticMotion(camId, "motion");
+
+        const motionActive = db.getState(
+            `${adapter.namespace}.cameras.${camId}.motion_active`,
+        ) as ioBroker.State | undefined;
+        expect(motionActive?.val, "motion_active true after event").to.equal(true);
+
+        // Auto-clear timer must be armed
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const timers = (adapter as any)._motionActiveTimers as Map<string, unknown>;
+        expect(timers.has(camId), "motion_active auto-clear timer armed").to.equal(true);
+    });
+
+    it("motion event with default config fetches snapshot → last_event_image + _at populated", async () => {
+        const fetchSnapshotStub = sinon
+            .stub()
+            .resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: fetchSnapshotStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+        // Reset history so we measure only the motion-triggered snapshot
+        fetchSnapshotStub.resetHistory();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // Drive a synthetic motion event
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any).triggerSyntheticMotion(camId, "motion");
+        await flushAutoSnapshot();
+
+        expect(
+            fetchSnapshotStub.callCount,
+            "fetchSnapshot fires on motion event (default config)",
+        ).to.be.greaterThanOrEqual(1);
+
+        const img = db.getState(
+            `${adapter.namespace}.cameras.${camId}.last_event_image`,
+        ) as ioBroker.State | undefined;
+        expect(
+            (img?.val as string | undefined) ?? "",
+            "last_event_image must be a data:image/jpeg;base64 string",
+        ).to.match(/^data:image\/jpeg;base64,/);
+
+        const ts = db.getState(
+            `${adapter.namespace}.cameras.${camId}.last_event_image_at`,
+        ) as ioBroker.State | undefined;
+        expect(
+            (ts?.val as string | undefined) ?? "",
+            "last_event_image_at must be a non-empty ISO timestamp",
+        ).to.match(/^\d{4}-\d{2}-\d{2}T/);
+    });
+
+    it("auto_snapshot_on_motion=false → no JPEG fetch on motion event", async () => {
+        const fetchSnapshotStub = sinon
+            .stub()
+            .resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0]));
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: fetchSnapshotStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+        fetchSnapshotStub.resetHistory();
+
+        // Opt out of the auto-snapshot
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (adapter as any).config.auto_snapshot_on_motion = false;
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any).triggerSyntheticMotion(camId, "motion");
+        await flushAutoSnapshot();
+
+        expect(
+            fetchSnapshotStub.callCount,
+            "fetchSnapshot must NOT fire when auto_snapshot_on_motion is off",
+        ).to.equal(0);
+        // motion_active must still flip (config flag only gates the snapshot path)
+        const motionActive = db.getState(
+            `${adapter.namespace}.cameras.${camId}.motion_active`,
+        ) as ioBroker.State | undefined;
+        expect(
+            motionActive?.val,
+            "motion_active must still flip even with snapshot off (Blockly trigger)",
+        ).to.equal(true);
+    });
+
+    // ── v0.5.3: dual stream URL (inst=2 sub-stream alongside inst=1 main) ──
+
+    it("livestream ON publishes both stream_url (inst=1) and stream_url_sub (inst=2)", async () => {
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // Toggle livestream ON so both URLs end up populated (and stay populated
+        // because the toggle cancels the idle-teardown timer).
+        const stateId = `${adapter.namespace}.cameras.${camId}.livestream_enabled`;
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+
+        const mainUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url`,
+        ) as ioBroker.State | undefined;
+        const subUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url_sub`,
+        ) as ioBroker.State | undefined;
+
+        expect(
+            (mainUrl?.val as string | undefined) ?? "",
+            "stream_url must carry inst=1",
+        ).to.match(/[?&]inst=1(&|$)/);
+        expect(
+            (subUrl?.val as string | undefined) ?? "",
+            "stream_url_sub must carry inst=2",
+        ).to.match(/[?&]inst=2(&|$)/);
+    });
+
+    it("teardown clears both stream_url and stream_url_sub", async () => {
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            closeLiveSession: sinon.stub().resolves(undefined),
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // Simulate teardown
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any)._teardownStream(camId);
+
+        const mainUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url`,
+        ) as ioBroker.State | undefined;
+        const subUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url_sub`,
+        ) as ioBroker.State | undefined;
+        expect(mainUrl?.val ?? "", "stream_url cleared on teardown").to.equal("");
+        expect(subUrl?.val ?? "", "stream_url_sub cleared on teardown").to.equal("");
     });
 
     it("camera flips to offline only after OFFLINE_THRESHOLD consecutive snapshot failures", async () => {

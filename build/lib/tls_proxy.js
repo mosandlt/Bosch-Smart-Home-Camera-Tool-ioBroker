@@ -55,6 +55,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startTlsProxy = startTlsProxy;
 const net = __importStar(require("node:net"));
 const tls = __importStar(require("node:tls"));
+const rtsp_auth_1 = require("./rtsp_auth");
 // ── Constants (mirrors Python tls_proxy.py) ───────────────────────────────────
 const _MAX_BURST = 5; // consecutive failures before closing server
 const _BURST_WINDOW = 30_000; // ms — window for burst counting
@@ -69,7 +70,7 @@ const _BURST_WINDOW = 30_000; // ms — window for burst counting
  */
 function startTlsProxy(options) {
     return new Promise((resolve, reject) => {
-        const { remoteHost, remotePort, cameraId, localPort = 0, bindHost = "127.0.0.1", urlHost, rejectUnauthorized = false, } = options;
+        const { remoteHost, remotePort, cameraId, localPort = 0, bindHost = "127.0.0.1", urlHost, rejectUnauthorized = false, digestAuth, } = options;
         const camLabel = cameraId.slice(0, 8);
         const log = options.log ?? (() => undefined);
         // Track all live sockets so stop() can destroy them
@@ -117,10 +118,28 @@ function startTlsProxy(options) {
                 firstFailAt = 0;
                 // Keep-alive on camera side too
                 remoteSocket.setKeepAlive(true, 30_000);
-                // Bidirectional pipe: client ↔ remote
-                // pipe() sets up data event listeners and handles backpressure
-                clientSocket.pipe(remoteSocket);
-                remoteSocket.pipe(clientSocket);
+                if (digestAuth) {
+                    // v0.5.3: auth-aware mode — parse RTSP traffic, inject
+                    // `Authorization: Digest …` headers transparently so
+                    // clients can connect to a no-creds URL (fixes BlueIris
+                    // Error 8000007a, forum #84538). Back-compat: when the
+                    // client supplies its own Authorization (legacy in-URL
+                    // creds path), the handler switches to passthrough.
+                    (0, rtsp_auth_1.attachRtspAuthHandler)({
+                        clientSocket,
+                        remoteSocket,
+                        digestUser: digestAuth.user,
+                        digestPassword: digestAuth.password,
+                        log,
+                        camLabel,
+                    });
+                }
+                else {
+                    // Bidirectional byte-pipe: client ↔ remote.
+                    // pipe() sets up data event listeners and handles backpressure.
+                    clientSocket.pipe(remoteSocket);
+                    remoteSocket.pipe(clientSocket);
+                }
             });
             remoteSocket.on("error", (err) => {
                 const now = Date.now();

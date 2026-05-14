@@ -197,9 +197,47 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * `cameras.<id>.livestream_enabled` is true, ensureLiveSession() keeps
      * the Bosch session + TLS proxy + watchdog alive; when false, the
      * adapter still opens short-lived sessions for snapshots but tears them
-     * down immediately after so no proxy/watchdog stays running.
+     * down after the idle window so no proxy/watchdog stays running.
      */
     private _livestreamEnabled = new Map<string, boolean>();
+
+    /**
+     * v0.5.3: pending "idle teardown" timer per camera (livestream OFF mode).
+     * After each snapshot the timer is reset; when it finally fires we close
+     * the Bosch session + TLS proxy + watchdog. Lets back-to-back
+     * snapshot_trigger writes (e.g. a Card opening, an automation polling)
+     * reuse the warm session instead of paying the PUT /connection cost
+     * every time. Cleared eagerly on _teardownStream, livestream toggle ON,
+     * and onUnload.
+     */
+    private _snapshotIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    /**
+     * Idle window after a snapshot before the session is torn down (ms).
+     * Sized to match SESSION_TTL_MS in ensureLiveSession so a snapshot
+     * burst within the window always reuses the cached session instead of
+     * forcing a fresh `PUT /v11/.../connection`.
+     */
+    private static readonly SNAPSHOT_SESSION_IDLE_MS = 60_000;
+
+    /**
+     * v0.5.3: per-camera "motion_active=true" auto-clear timers. When a
+     * motion event fires we set motion_active=true; this timer flips it
+     * back to false after MOTION_ACTIVE_WINDOW_MS so automations have a
+     * clean rising/falling edge to listen on. Re-armed (window slides) on
+     * every follow-up event within the window.
+     */
+    private _motionActiveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    /**
+     * How long `cameras.<id>.motion_active` stays true after the last
+     * motion event before auto-clearing (ms). Mirrors the HA integration's
+     * EVENT_ACTIVE_WINDOW (90 s) — long enough that a person walking
+     * through the frame keeps the boolean high through the whole pass,
+     * short enough that a real motion gap (no events for >90 s) flips it
+     * back to false.
+     */
+    private static readonly MOTION_ACTIVE_WINDOW_MS = 90_000;
 
     /**
      *
@@ -727,6 +765,75 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 native: {},
             });
 
+            // v0.5.3: edge-trigger boolean for automations. Goes true on every
+            // motion/person/audio_alarm event and auto-clears after
+            // MOTION_ACTIVE_WINDOW_MS (default 90 s) so Blockly etc. can
+            // listen for the rising edge instead of having to diff timestamps.
+            await this.setObjectNotExistsAsync(`${prefix}.motion_active`, {
+                type: "state",
+                common: {
+                    name: "True while a motion/person/audio event is recent (auto-clears after ~90 s)",
+                    role: "sensor.motion",
+                    type: "boolean",
+                    read: true,
+                    write: false,
+                    def: false,
+                },
+                native: {},
+            });
+
+            // v0.5.3: base64 JPEG of the snapshot taken right when motion fired.
+            // Use this for Telegram/Signal/Matrix push pipelines that consume
+            // a base64 image directly — no need to read the file store.
+            // String length can reach ~150 kB; ioBroker handles that fine.
+            await this.setObjectNotExistsAsync(`${prefix}.last_event_image`, {
+                type: "state",
+                common: {
+                    name: "Base64-encoded JPEG fetched on the last motion event (for Telegram/Signal/Matrix push)",
+                    role: "text",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
+            // v0.5.3: timestamp matching last_event_image, so consumers can
+            // tell whether the base64 buffer is the current event's snap or
+            // a leftover from an earlier event when auto-snapshot was off.
+            await this.setObjectNotExistsAsync(`${prefix}.last_event_image_at`, {
+                type: "state",
+                common: {
+                    name: "Timestamp of the JPEG in last_event_image (ISO 8601)",
+                    role: "value.time",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
+            // v0.5.3: dual-stream — sub-stream URL via inst=2 (CPP6 firmware
+            // serves up to 4 video instances per encoder; Bosch cameras
+            // typically expose inst=1 (main, high bitrate) + inst=2 (sub,
+            // lower bitrate). Experimental: if your camera firmware doesn't
+            // serve inst=2, the URL returns RTSP SETUP error and BlueIris/
+            // Frigate just won't connect — main stream is unaffected.
+            await this.setObjectNotExistsAsync(`${prefix}.stream_url_sub`, {
+                type: "state",
+                common: {
+                    name: "Sub-stream RTSP URL (inst=2, lower bitrate) — experimental, depends on camera firmware",
+                    role: "text.url",
+                    type: "string",
+                    read: true,
+                    write: false,
+                    def: "",
+                },
+                native: {},
+            });
+
             // Set initial values
             await this.upsertState(`${prefix}.name`, cam.name);
             await this.upsertState(`${prefix}.firmware_version`, cam.firmwareVersion);
@@ -858,7 +965,12 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * @param camId
      */
     private async ensureLiveSession(camId: string): Promise<LiveSession> {
-        const SESSION_TTL_MS = 30_000; // 30 s conservative re-open threshold
+        // v0.5.3: bumped from 30 s → 60 s so a snapshot burst inside the
+        // SNAPSHOT_SESSION_IDLE_MS keep-alive window can always reuse the
+        // cached session. Watchdog handles real session renewal at ~T-60s
+        // before maxSessionDuration; this TTL is only a safety net against
+        // an externally-killed session (camera reboot, cloud-side close).
+        const SESSION_TTL_MS = 60_000;
 
         const existing = this._liveSessions.get(camId);
         if (existing && Date.now() - existing.openedAt < SESSION_TTL_MS) {
@@ -903,13 +1015,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
                         `RTSP watchdog: LOCAL renewal failed for camera ${camId.slice(0, 8)} — ` +
                             `stream will stop: ${err.message}`,
                     );
-                    // Stop the TLS proxy and clear the stream_url
+                    // Stop the TLS proxy and clear both stream URLs (main + sub)
                     const proxy = this._tlsProxies.get(camId);
                     if (proxy) {
                         void proxy.stop().catch(() => undefined);
                         this._tlsProxies.delete(camId);
                     }
                     void this.upsertState(`cameras.${camId}.stream_url`, "");
+                    void this.upsertState(`cameras.${camId}.stream_url_sub`, "");
                     this._sessionWatchdogs.delete(camId);
                 },
                 log: (level, msg) => this.log[level](msg),
@@ -976,6 +1089,12 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
                 const { bindHost, urlHost } = this._rtspBindConfig();
 
+                // v0.5.3: forward the session's Digest creds to the proxy so
+                // it can handle auth transparently for clients that don't.
+                const digestAuth = {
+                    user: session.digestUser,
+                    password: session.digestPassword,
+                };
                 try {
                     proxyHandle = await startTlsProxy({
                         remoteHost,
@@ -984,6 +1103,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
                         localPort: preferredPort,
                         bindHost,
                         urlHost,
+                        digestAuth,
                         log: (level, msg) => this.log[level](msg),
                     });
                 } catch (bindErr: unknown) {
@@ -1000,6 +1120,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
                             cameraId: camId,
                             bindHost,
                             urlHost,
+                            digestAuth,
                             log: (level, msg2) => this.log[level](msg2),
                         });
                     } else {
@@ -1030,13 +1151,17 @@ class BoschSmartHomeCamera extends utils.Adapter {
             // Bosch RTSP demands Digest auth; without `user:pass@…` consumers
             // (cameras adapter, BlueIris, FFmpeg without separate auth) return
             // "401 Unauthorized". The query params mirror what HA / Python CLI
-            // build: inst=1 (instance), enableaudio=1, fmtp=1, maxSessionDuration.
-            const credsUrl = this._buildStreamUrl(proxyHandle, session);
+            // build: inst=1 (main), enableaudio=1, fmtp=1, maxSessionDuration.
+            // v0.5.3: also publish inst=2 (sub-stream) under stream_url_sub so
+            // BlueIris / Frigate can do mainstream-record + substream-display
+            // and save CPU. Same Bosch session, same TLS proxy, same auth.
+            const credsUrl = this._buildStreamUrl(proxyHandle, session, 1);
+            const subUrl = this._buildStreamUrl(proxyHandle, session, 2);
 
             await this.setObjectNotExistsAsync(`cameras.${camId}.stream_url`, {
                 type: "state",
                 common: {
-                    name: "Local RTSP URL (with Digest creds) for the RTSPS stream",
+                    name: "Local RTSP URL — auth handled transparently by the proxy",
                     role: "text.url",
                     type: "string",
                     read: true,
@@ -1046,9 +1171,10 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 native: {},
             });
             await this.upsertState(`cameras.${camId}.stream_url`, credsUrl);
+            await this.upsertState(`cameras.${camId}.stream_url_sub`, subUrl);
             this.log.info(
                 `TLS proxy for camera ${camId.slice(0, 8)}: ` +
-                    `stream_url = ${this._maskCreds(credsUrl)}`,
+                    `stream_url = ${credsUrl} | stream_url_sub = ${subUrl}`,
             );
         } catch (proxyErr: unknown) {
             // TLS proxy failure is non-fatal for RCP/snapshot — log and continue
@@ -1085,12 +1211,20 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * @param proxy
      * @param session
      */
-    private _buildStreamUrl(proxy: TlsProxyHandle, session: LiveSession): string {
-        const u = encodeURIComponent(session.digestUser);
-        const p = encodeURIComponent(session.digestPassword);
-        const base = proxy.localRtspUrl.replace("rtsp://", `rtsp://${u}:${p}@`);
+    private _buildStreamUrl(
+        proxy: TlsProxyHandle,
+        session: LiveSession,
+        instance: 1 | 2 = 1,
+    ): string {
+        // v0.5.3: stream URL no longer embeds Digest credentials. The TLS
+        // proxy now handles RTSP Digest auth itself (see lib/rtsp_auth.ts),
+        // so consumers get a clean `rtsp://host:port/rtsp_tunnel?…` URL
+        // that works with clients which strip in-URL creds (BlueIris,
+        // Forum #84538 posts 13–18). VLC / FFmpeg also keep working — the
+        // proxy detects whether the client supplies its own Authorization
+        // header and only injects when needed.
         const dur = session.maxSessionDuration > 0 ? session.maxSessionDuration : 3600;
-        return `${base}?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=${dur}`;
+        return `${proxy.localRtspUrl}?inst=${instance}&enableaudio=1&fmtp=1&maxSessionDuration=${dur}`;
     }
 
     /**
@@ -1693,7 +1827,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
 
     /**
      * Handle an FCM motion/person/audio_alarm push event.
-     * Writes per-camera last_motion_at + last_motion_event_type states.
+     * Writes per-camera last_motion_at + last_motion_event_type, flips
+     * motion_active=true (with auto-clear timer), and — when
+     * `auto_snapshot_on_motion` is on — fetches a fresh JPEG and publishes
+     * it as base64 in last_event_image so Telegram / Signal / Matrix
+     * automations can push it directly.
      *
      * @param ev
      */
@@ -1704,6 +1842,53 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this.log.info(
             `FCM event [${ev.eventType}] for camera ${ev.cameraId.slice(0, 8)} at ${ev.timestamp}`,
         );
+        await this._onMotionFired(ev.cameraId);
+    }
+
+    /**
+     * v0.5.3: shared post-event side effects, called by both real FCM
+     * events and synthetic motion triggers. Flips motion_active=true with
+     * a 90 s auto-clear, and — when auto_snapshot_on_motion is enabled —
+     * fires a fresh snapshot in the background (reuses the warm session
+     * via the v0.5.3 keep-alive optimization for rapid bursts).
+     *
+     * @param camId Camera UUID
+     */
+    private async _onMotionFired(camId: string): Promise<void> {
+        // Edge-trigger boolean: set true, arm 90 s auto-clear
+        await this.setStateAsync(`cameras.${camId}.motion_active`, true, true);
+        const previous = this._motionActiveTimers.get(camId);
+        if (previous) {
+            clearTimeout(previous);
+        }
+        const clearTimer = setTimeout(() => {
+            this._motionActiveTimers.delete(camId);
+            void this.setStateAsync(`cameras.${camId}.motion_active`, false, true).catch(
+                (err: unknown) => {
+                    this.log.debug(
+                        `motion_active auto-clear for ${camId.slice(0, 8)} threw: ` +
+                            `${err instanceof Error ? err.message : String(err)}`,
+                    );
+                },
+            );
+        }, BoschSmartHomeCamera.MOTION_ACTIVE_WINDOW_MS);
+        clearTimer.unref();
+        this._motionActiveTimers.set(camId, clearTimer);
+
+        // Optional: auto-snapshot — default true, opt-out via adapter config
+        // (the field is `undefined` on legacy installs that never saw the
+        // option, so treat `undefined` like `true`).
+        const optedOut = this.config.auto_snapshot_on_motion === false;
+        if (!optedOut) {
+            void this.handleSnapshotTrigger(camId, { asMotionEvent: true }).catch(
+                (err: unknown) => {
+                    this.log.debug(
+                        `Auto-snapshot on motion for ${camId.slice(0, 8)} failed: ` +
+                            `${err instanceof Error ? err.message : String(err)}`,
+                    );
+                },
+            );
+        }
     }
 
     /**
@@ -1730,6 +1915,10 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.setStateAsync(`${prefix}.last_motion_at`, ts, true);
         await this.setStateAsync(`${prefix}.last_motion_event_type`, eventType, true);
         this.log.info(`Synthetic ${eventType} trigger for camera ${camId.slice(0, 8)}`);
+        // v0.5.3: same side-effects as a real FCM event so synthetic
+        // triggers (Philips Hue motion in the driveway, …) also flip
+        // motion_active and refresh last_event_image.
+        await this._onMotionFired(camId);
     }
 
     /**
@@ -1875,18 +2064,64 @@ class BoschSmartHomeCamera extends utils.Adapter {
     }
 
     /**
+     * Arm (or reset) the post-snapshot idle teardown timer for one camera.
+     * Called from `handleSnapshotTrigger` in `finally` when livestream is
+     * OFF. Each new snapshot resets the timer so a Card / automation
+     * burst keeps the Bosch session warm for `SNAPSHOT_SESSION_IDLE_MS`
+     * (default 60 s) — only the first snap pays the `PUT /connection`
+     * cost, subsequent snaps reuse the cached session.
+     *
+     * @param camId  Camera UUID
+     */
+    private _armSnapshotIdleTeardown(camId: string): void {
+        // Cancel any previous pending teardown so the window slides on every snap
+        const previous = this._snapshotIdleTimers.get(camId);
+        if (previous) {
+            clearTimeout(previous);
+        }
+        const timer = setTimeout(() => {
+            this._snapshotIdleTimers.delete(camId);
+            void this._teardownStream(camId).catch((err: unknown) => {
+                this.log.debug(
+                    `Idle teardown for ${camId.slice(0, 8)} threw: ` +
+                        `${err instanceof Error ? err.message : String(err)}`,
+                );
+            });
+        }, BoschSmartHomeCamera.SNAPSHOT_SESSION_IDLE_MS);
+        // unref() so a dangling timer doesn't keep the Node event loop alive
+        // — important for mocha. Production: ioBroker holds the loop open.
+        timer.unref();
+        this._snapshotIdleTimers.set(camId, timer);
+    }
+
+    /** Cancel the pending idle-teardown timer for one camera, if any. */
+    private _cancelSnapshotIdleTeardown(camId: string): void {
+        const timer = this._snapshotIdleTimers.get(camId);
+        if (timer) {
+            clearTimeout(timer);
+            this._snapshotIdleTimers.delete(camId);
+        }
+    }
+
+    /**
      * Tear down everything that keeps a livestream alive for one camera:
      * session watchdog, TLS proxy, Bosch live session (DELETE /connection),
      * and the public stream_url DP. Used by:
      *   - the livestream toggle (user sets livestream_enabled=false)
-     *   - the one-shot snapshot path when livestream is OFF (auto-cleanup
-     *     so a single snapshot doesn't accidentally start 24/7 streaming).
+     *   - the post-snapshot idle timer when livestream is OFF (auto-cleanup
+     *     so a Card burst doesn't accidentally start 24/7 streaming, but
+     *     consecutive snaps within the idle window reuse the warm session).
      * Best-effort throughout — Bosch may have already closed the session
      * server-side after a transient network drop.
      *
      * @param camId  Camera UUID
      */
     private async _teardownStream(camId: string): Promise<void> {
+        // v0.5.3: cancel any pending idle-teardown timer first so this
+        // explicit teardown can't race with a delayed timer firing later
+        // and trying to close an already-closed session.
+        this._cancelSnapshotIdleTeardown(camId);
+
         // Stop watchdog FIRST so it doesn't fire a renewal after we close
         const watchdog = this._sessionWatchdogs.get(camId);
         if (watchdog) {
@@ -1922,8 +2157,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
         }
         this._liveSessions.delete(camId);
 
-        // Clear the public stream_url DP so consumers see "no stream"
+        // Clear the public stream_url DPs (main + sub) so consumers see "no stream"
         await this.upsertState(`cameras.${camId}.stream_url`, "");
+        await this.upsertState(`cameras.${camId}.stream_url_sub`, "");
     }
 
     /**
@@ -1943,6 +2179,13 @@ class BoschSmartHomeCamera extends utils.Adapter {
             return; // no-op
         }
         if (enabled) {
+            // v0.5.3: cancel any pending snapshot idle teardown — once
+            // livestream is on, the session must stay alive indefinitely
+            // (watchdog handles natural renewal). Without this cancel, a
+            // snapshot triggered just before the user enabled livestream
+            // could fire the idle timer 60 s later and tear down the
+            // freshly-opened stream.
+            this._cancelSnapshotIdleTeardown(camId);
             // Open Bosch session + spawn TLS proxy + arm watchdog + populate stream_url
             await this.ensureLiveSession(camId);
             this.log.info(`Livestream STARTED for camera ${camId.slice(0, 8)}`);
@@ -2249,14 +2492,19 @@ class BoschSmartHomeCamera extends utils.Adapter {
      *
      * @param camId
      */
-    private async handleSnapshotTrigger(camId: string): Promise<void> {
+    private async handleSnapshotTrigger(
+        camId: string,
+        opts: { asMotionEvent?: boolean } = {},
+    ): Promise<void> {
         const session = await this.ensureLiveSession(camId);
         const snapUrl = buildSnapshotUrl(session.proxyUrl);
 
         // v0.5.2: when livestream is OFF (default), a snapshot must NOT leave
-        // a long-running session + proxy + watchdog behind. We tear those
-        // down in `finally` regardless of snapshot success/failure so a
-        // single snap.jpg can't accidentally pin a 24/7 stream open.
+        // a long-running session + proxy + watchdog behind.
+        // v0.5.3: instead of tearing down immediately we arm an idle timer
+        // in `finally`; back-to-back snaps within
+        // SNAPSHOT_SESSION_IDLE_MS reset it and reuse the cached session.
+        // After the idle window expires the timer fires _teardownStream.
         const livestreamOn = this._livestreamEnabled.get(camId) === true;
 
         try {
@@ -2290,16 +2538,29 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 `/${this.namespace}/${filePath}`,
                 true,
             );
+
+            // v0.5.3: motion-event snapshots additionally publish the JPEG as
+            // base64 so push integrations (Telegram, Signal, Matrix) can
+            // forward the picture without reading the adapter file store.
+            if (opts.asMotionEvent) {
+                const b64 = `data:image/jpeg;base64,${buf.toString("base64")}`;
+                await this.setStateAsync(`cameras.${camId}.last_event_image`, b64, true);
+                await this.setStateAsync(
+                    `cameras.${camId}.last_event_image_at`,
+                    new Date().toISOString(),
+                    true,
+                );
+            }
+
             await this.markCameraReachability(camId, true);
             this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
         } finally {
             if (!livestreamOn) {
-                await this._teardownStream(camId).catch((err: unknown) => {
-                    this.log.debug(
-                        `Snapshot post-teardown for ${camId.slice(0, 8)} threw: ` +
-                            `${err instanceof Error ? err.message : String(err)}`,
-                    );
-                });
+                // v0.5.3: arm idle teardown instead of closing immediately so
+                // a burst of snapshot_triggers reuses the warm session. The
+                // timer is reset on every snap, so the window always extends
+                // SNAPSHOT_SESSION_IDLE_MS from the *last* snap.
+                this._armSnapshotIdleTeardown(camId);
             }
         }
     }
@@ -2394,6 +2655,23 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     }
                     this._fcmListener = null;
                 }
+
+                // v0.5.3: cancel pending snapshot idle teardown timers
+                // before stopping the watchdogs/proxies — otherwise a timer
+                // that fires during shutdown would try to close an
+                // already-closed session.
+                for (const [, timer] of this._snapshotIdleTimers) {
+                    clearTimeout(timer);
+                }
+                this._snapshotIdleTimers.clear();
+
+                // v0.5.3: cancel motion_active auto-clear timers so they
+                // don't fire after shutdown and try to write states on a
+                // dead adapter.
+                for (const [, timer] of this._motionActiveTimers) {
+                    clearTimeout(timer);
+                }
+                this._motionActiveTimers.clear();
 
                 // Stop all session watchdogs BEFORE stopping TLS proxies
                 // (prevents watchdog renewal racing with cleanup)

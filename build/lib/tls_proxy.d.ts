@@ -62,6 +62,23 @@ export interface TlsProxyOptions {
      * Default false — Bosch cameras use a private CA.
      */
     rejectUnauthorized?: boolean;
+    /**
+     * v0.5.3: when set, the proxy speaks RTSP and handles the Digest
+     * auth dance against the camera itself. Clients that connect WITHOUT
+     * `Authorization:` headers (BlueIris, iobroker.cameras, many NVRs)
+     * see a clean 200 OK and never need to manage credentials. Clients
+     * that already send `Authorization:` are byte-piped through (legacy
+     * stream_url with in-URL creds keeps working).
+     *
+     * Pass the same Digest credentials Bosch returned for the live
+     * session (`session.digestUser` / `session.digestPassword`).
+     * When omitted, the proxy reverts to a pure byte-pipe — equivalent
+     * to v0.5.2 behaviour.
+     */
+    digestAuth?: {
+        user: string;
+        password: string;
+    };
 }
 /**
  * Start a local TLS proxy that exposes a Bosch RTSPS endpoint as plain RTSP

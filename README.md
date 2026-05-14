@@ -1,10 +1,96 @@
 # ioBroker.bosch-smart-home-camera
 
-ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor/Indoor, 360°, Gen2 Eyes Indoor II + Outdoor II) — beta. The full core feature set is functional end-to-end and verified live against real hardware.
+ioBroker adapter for Bosch Smart Home Cameras (Eyes Außenkamera, 360 Innenkamera, Gen2 Eyes Indoor II + Outdoor II) — beta. The full core feature set is functional end-to-end and verified live against real hardware.
 
-See the [Home Assistant integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) for the mature reference implementation (v12.0.1, HA Quality Scale Platinum).
+> **No official API.** This adapter uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Camera app.
+
+[![GitHub Release][releases-shield]][releases]
+[![GitHub Activity][commits-shield]][commits]
+[![License][license-shield]](LICENSE)
+
+[![Project Maintenance][maintenance-shield]][user_profile]
+[![BuyMeCoffee][buymecoffeebadge]][buymecoffee]
+
+[![Community Forum][forum-shield]][forum]
+![AI-Assisted](https://img.shields.io/badge/AI--Assisted-blue?style=for-the-badge)
+
+[releases-shield]: https://img.shields.io/github/release/mosandlt/ioBroker.bosch-smart-home-camera.svg?style=for-the-badge
+[releases]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/releases
+[commits-shield]: https://img.shields.io/github/commit-activity/y/mosandlt/ioBroker.bosch-smart-home-camera.svg?style=for-the-badge
+[commits]: https://github.com/mosandlt/ioBroker.bosch-smart-home-camera/commits/main
+[license-shield]: https://img.shields.io/github/license/mosandlt/ioBroker.bosch-smart-home-camera.svg?style=for-the-badge
+[maintenance-shield]: https://img.shields.io/badge/maintainer-%40mosandlt-blue.svg?style=for-the-badge
+[user_profile]: https://github.com/mosandlt
+[buymecoffeebadge]: https://img.shields.io/badge/buy%20me%20a%20coffee-donate-yellow.svg?style=for-the-badge
+[buymecoffee]: https://buymeacoffee.com/mosandlts
+[forum-shield]: https://img.shields.io/badge/community-forum-brightgreen.svg?style=for-the-badge
+[forum]: https://forum.iobroker.net/topic/84538
+
+---
+
+## Table of Contents
+
+- [Integration Comparison](#integration-comparison) — pick the right project for your platform
+- [Status](#status)
+- [Setup](#setup)
+- [Datapoints](#datapoints)
+- [Changelog](#changelog)
+- [License](#license)
+
+---
+
+## Integration Comparison
+
+The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling projects. Pick the one that fits your platform.
+
+| Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) |
+|---|---|---|---|
+| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.2+ stable | v0.5+ beta |
+| **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) |
+| **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) |
+| **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |
+| **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP |
+| **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ❌ | ❌ |
+| **Dual-stream URL (main + sub)** | ❌ | ❌ | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
+| **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option |
+| **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP |
+| **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP |
+| **RGB wallwasher (Gen2 Outdoor II)** | ✅ light w/ RGB | ✅ command | ✅ color + brightness DPs |
+| **Panic-alarm siren (Gen2)** | ✅ button entity | ✅ command | ✅ DP |
+| **Image rotation 180°** | ✅ switch | ✅ flag | ✅ DP |
+| **Motion / person / audio events** | ✅ FCM push + polling fallback | ✅ event-watch command | ✅ FCM push + polling fallback |
+| **Motion edge-trigger state** | ✅ `binary_sensor.motion` | n/a | ✅ `motion_active` DP *(v0.5.3)* |
+| **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* |
+| **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP |
+| **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ✅ download command | ❌ *(parked — no community request yet)* |
+| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ❌ | ❌ |
+| **SMB / NAS clip upload** | ✅ | ❌ | ❌ |
+| **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ |
+| **Camera sharing (friends)** | ❌ | ✅ command | ❌ |
+| **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ❌ |
+| **Two-way audio / intercom** | ❌ | ✅ command | ❌ |
+| **Custom Lovelace card** | ✅ 2 cards (single + grid) | n/a | n/a |
+| **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` |
+| **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* |
+| **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs |
+
+**Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
+
+> All three projects share the same reverse-engineered Cloud API + RCP protocol research, but evolve independently. The Home Assistant integration is the most feature-complete reference implementation; the Python CLI is the lowest-level / scriptable surface; the ioBroker adapter is the youngest of the three and currently focused on the core states most users need for VIS dashboards and Blockly automations.
+
+
+---
 
 ## Changelog
+
+### v0.5.3 (beta)
+Five forum-driven improvements — focused on the BlueIris / NVR-recorder integration story.
+
+- **RTSP-aware proxy with transparent Digest auth (fixes forum #84538 BlueIris Error 8000007a)**: the TLS proxy now speaks RTSP and handles the Bosch Digest auth dance itself. Clients (BlueIris, iobroker.cameras, Frigate, …) connect to a clean `rtsp://host:port/rtsp_tunnel?inst=1&…` URL — **no credentials in the URL anymore**. The proxy parses the first 401 challenge from the camera, computes the response, swallows the 401, and injects an `Authorization: Digest …` header on every subsequent client request. Back-compat: clients that already send their own `Authorization` header (legacy in-URL creds path, VLC after a 401) are byte-piped through unchanged. Jaschkopf no longer needs to enter Digest credentials in BlueIris's own fields.
+- **Snapshot session keep-alive (60 s idle window)**: rapid `snapshot_trigger` bursts (a Card opening, an automation polling every 5 s, a blockly script) reuse the warm Bosch session instead of paying `PUT /v11/.../connection` on every snap. Saves daily LOCAL session quota and cuts latency from ~1–2 s to ~200 ms after the first snap.
+- **`cameras.<id>.motion_active`** (new, boolean, read-only): edge-trigger DP, flips `true` on every motion / person / audio event, auto-clears to `false` after 90 s of no further events. Gives Blockly automations the clean rising/falling edge the existing `last_motion_at` timestamp doesn't provide.
+- **`cameras.<id>.last_event_image`** + **Auto-snapshot on motion**: every FCM motion / person / audio_alarm event now fetches a fresh JPEG and writes it as a `data:image/jpeg;base64,…` string to `last_event_image` (plus matching `last_event_image_at` timestamp). Ready for Telegram / Signal / Matrix push automations without scripting. Toggle in new admin tab **Events / Notifications** (`auto_snapshot_on_motion`, default ON).
+- **`cameras.<id>.stream_url_sub`** (new, experimental): sub-stream URL via `inst=2` alongside the main `inst=1` `stream_url`. Same Bosch session, same TLS proxy, zero extra quota cost. Lets BlueIris record the main stream while displaying the lower-bitrate substream for CPU savings. Depends on the camera firmware actually serving `inst=2` (Gen2 Eyes typically does; Gen1 may not).
 
 ### v0.5.2 (beta)
 Per-camera livestream switch — default OFF.

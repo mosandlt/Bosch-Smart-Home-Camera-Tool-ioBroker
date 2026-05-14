@@ -147,6 +147,55 @@
           "hidden": "!data.rtsp_expose_to_lan"
         }
       }
+    },
+    "tab_events": {
+      "type": "panel",
+      "label": {
+        "en": "Events / Notifications",
+        "de": "Events / Benachrichtigungen"
+      },
+      "items": {
+        "_info_events": {
+          "type": "header",
+          "text": {
+            "en": "Motion-triggered snapshot refresh",
+            "de": "Snapshot-Aktualisierung bei Bewegung"
+          },
+          "size": 5,
+          "sm": 12
+        },
+        "_events_help": {
+          "type": "staticText",
+          "text": {
+            "en": "When the camera reports a motion / person / audio_alarm event (via FCM push or polling fallback), automatically fetch a fresh snapshot and write a base64-encoded copy into cameras.<id>.last_event_image. Perfect for Telegram / Signal / Matrix push notifications: your automation reads last_event_image and forwards the JPEG directly, no separate snapshot_trigger needed. Bursts (continuous motion) reuse the warm Bosch session so quota stays low.",
+            "de": "Wenn die Kamera ein Motion- / Person- / Audio-Alarm-Event meldet (per FCM-Push oder Polling-Fallback), wird automatisch ein frisches Snapshot abgerufen und eine Base64-kodierte Kopie in cameras.<id>.last_event_image geschrieben. Ideal für Telegram- / Signal- / Matrix-Pushnachrichten: die Automation liest last_event_image und schickt das JPEG direkt weiter, ohne extra snapshot_trigger. Bei Burst-Events (anhaltende Bewegung) wird die warme Bosch-Session weiterverwendet, Quota bleibt niedrig."
+          },
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12
+        },
+        "auto_snapshot_on_motion": {
+          "type": "checkbox",
+          "label": {
+            "en": "Auto-snapshot on motion event",
+            "de": "Snapshot automatisch bei Bewegungs-Event"
+          },
+          "help": {
+            "en": "Fetches a fresh JPEG on every motion / person / audio_alarm event and updates both cameras.<id>.snapshot_path (file store) and cameras.<id>.last_event_image (base64 string).",
+            "de": "Holt bei jedem Motion- / Person- / Audio-Event ein frisches JPEG und aktualisiert sowohl cameras.<id>.snapshot_path (File-Store) als auch cameras.<id>.last_event_image (Base64-String)."
+          },
+          "default": true,
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 6,
+          "lg": 6,
+          "xl": 6
+        }
+      }
     }
   }
 }

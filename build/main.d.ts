@@ -122,9 +122,43 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * `cameras.<id>.livestream_enabled` is true, ensureLiveSession() keeps
      * the Bosch session + TLS proxy + watchdog alive; when false, the
      * adapter still opens short-lived sessions for snapshots but tears them
-     * down immediately after so no proxy/watchdog stays running.
+     * down after the idle window so no proxy/watchdog stays running.
      */
     private _livestreamEnabled;
+    /**
+     * v0.5.3: pending "idle teardown" timer per camera (livestream OFF mode).
+     * After each snapshot the timer is reset; when it finally fires we close
+     * the Bosch session + TLS proxy + watchdog. Lets back-to-back
+     * snapshot_trigger writes (e.g. a Card opening, an automation polling)
+     * reuse the warm session instead of paying the PUT /connection cost
+     * every time. Cleared eagerly on _teardownStream, livestream toggle ON,
+     * and onUnload.
+     */
+    private _snapshotIdleTimers;
+    /**
+     * Idle window after a snapshot before the session is torn down (ms).
+     * Sized to match SESSION_TTL_MS in ensureLiveSession so a snapshot
+     * burst within the window always reuses the cached session instead of
+     * forcing a fresh `PUT /v11/.../connection`.
+     */
+    private static readonly SNAPSHOT_SESSION_IDLE_MS;
+    /**
+     * v0.5.3: per-camera "motion_active=true" auto-clear timers. When a
+     * motion event fires we set motion_active=true; this timer flips it
+     * back to false after MOTION_ACTIVE_WINDOW_MS so automations have a
+     * clean rising/falling edge to listen on. Re-armed (window slides) on
+     * every follow-up event within the window.
+     */
+    private _motionActiveTimers;
+    /**
+     * How long `cameras.<id>.motion_active` stays true after the last
+     * motion event before auto-clearing (ms). Mirrors the HA integration's
+     * EVENT_ACTIVE_WINDOW (90 s) — long enough that a person walking
+     * through the frame keeps the boolean high through the whole pass,
+     * short enough that a real motion gap (no events for >90 s) flips it
+     * back to false.
+     */
+    private static readonly MOTION_ACTIVE_WINDOW_MS;
     /**
      *
      * @param options
@@ -278,11 +312,25 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     private onStateChange;
     /**
      * Handle an FCM motion/person/audio_alarm push event.
-     * Writes per-camera last_motion_at + last_motion_event_type states.
+     * Writes per-camera last_motion_at + last_motion_event_type, flips
+     * motion_active=true (with auto-clear timer), and — when
+     * `auto_snapshot_on_motion` is on — fetches a fresh JPEG and publishes
+     * it as base64 in last_event_image so Telegram / Signal / Matrix
+     * automations can push it directly.
      *
      * @param ev
      */
     private onFcmEvent;
+    /**
+     * v0.5.3: shared post-event side effects, called by both real FCM
+     * events and synthetic motion triggers. Flips motion_active=true with
+     * a 90 s auto-clear, and — when auto_snapshot_on_motion is enabled —
+     * fires a fresh snapshot in the background (reuses the warm session
+     * via the v0.5.3 keep-alive optimization for rapid bursts).
+     *
+     * @param camId Camera UUID
+     */
+    private _onMotionFired;
     /**
      * Inject a synthetic motion event for a camera.
      *
@@ -346,12 +394,26 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private handleStreamQualityChange;
     /**
+     * Arm (or reset) the post-snapshot idle teardown timer for one camera.
+     * Called from `handleSnapshotTrigger` in `finally` when livestream is
+     * OFF. Each new snapshot resets the timer so a Card / automation
+     * burst keeps the Bosch session warm for `SNAPSHOT_SESSION_IDLE_MS`
+     * (default 60 s) — only the first snap pays the `PUT /connection`
+     * cost, subsequent snaps reuse the cached session.
+     *
+     * @param camId  Camera UUID
+     */
+    private _armSnapshotIdleTeardown;
+    /** Cancel the pending idle-teardown timer for one camera, if any. */
+    private _cancelSnapshotIdleTeardown;
+    /**
      * Tear down everything that keeps a livestream alive for one camera:
      * session watchdog, TLS proxy, Bosch live session (DELETE /connection),
      * and the public stream_url DP. Used by:
      *   - the livestream toggle (user sets livestream_enabled=false)
-     *   - the one-shot snapshot path when livestream is OFF (auto-cleanup
-     *     so a single snapshot doesn't accidentally start 24/7 streaming).
+     *   - the post-snapshot idle timer when livestream is OFF (auto-cleanup
+     *     so a Card burst doesn't accidentally start 24/7 streaming, but
+     *     consecutive snaps within the idle window reuse the warm session).
      * Best-effort throughout — Bosch may have already closed the session
      * server-side after a transient network drop.
      *

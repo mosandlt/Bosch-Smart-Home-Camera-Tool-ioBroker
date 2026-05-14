@@ -26,6 +26,14 @@ declare global {
              * "127.0.0.1".
              */
             rtsp_external_host?: string;
+            /**
+             * v0.5.3: when true (default), every motion / person / audio_alarm
+             * event (via FCM push or polling fallback) auto-fetches a fresh
+             * snapshot and writes a base64 copy into
+             * `cameras.<id>.last_event_image` for direct
+             * Telegram/Signal/Matrix push consumption.
+             */
+            auto_snapshot_on_motion?: boolean;
         }
     }
 }
