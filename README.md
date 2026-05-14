@@ -6,6 +6,15 @@ See the [Home Assistant integration](https://github.com/mosandlt/Bosch-Smart-Hom
 
 ## Changelog
 
+### v0.5.2 (beta)
+Per-camera livestream switch — default OFF.
+
+- **`cameras.<id>.livestream_enabled`** (new, boolean, writable, default `false`): explicit on/off switch for the continuous RTSP livestream. Previous behaviour opened a 24/7 Bosch LOCAL session + TLS proxy + RTSP watchdog on every adapter start — one open session per camera, consuming the daily LOCAL session quota even when nobody was watching the stream. Streaming is now opt-in:
+  - **Write `true`** → adapter calls `PUT /v11/video_inputs/{id}/connection`, spawns the TLS proxy on the sticky port, arms the RTSP watchdog (renews ~60 s before `maxSessionDuration` so external recorders see no drop), and populates `cameras.<id>.stream_url` with the digest-credentials URL.
+  - **Write `false`** → watchdog cancelled, TLS proxy stopped, Bosch session closed via `DELETE /v11/video_inputs/{id}/connection`, `stream_url` cleared.
+- **Snapshots remain unaffected**: every `snapshot_trigger` (and the one-per-camera startup snapshot that probes the `online` state) still opens a session, fetches the JPEG, and then — when `livestream_enabled` is `false` — closes the session right after so no proxy or watchdog stays running.
+- **BlueIris recipe (forum #84538 post 14)**: VLC accepts `rtsp://user:pass@host/...` directly, BlueIris does not. To consume the stream in BlueIris, paste just `rtsp://<host>:<port>/rtsp_tunnel?…` into the address field (strip the `user:pass@` part), enter the Digest username and password in BlueIris's separate **Username / Password** fields, and set **RTSP Authentication = Digest**. Error code `8000007a (CheckPort/User/Password)` typically means BlueIris failed to apply the in-URL credentials — entering them in the dedicated fields resolves it.
+
 ### v0.5.1 (beta)
 Adds Gen2 siren + RGB wallwasher colour, plus the v0.5.0 forum-driven fixes:
 

@@ -71,6 +71,10 @@ async function setPanicAlarm(httpClient, token, cameraId, enabled) {
 /**
  * Fetch the current Gen2 lighting state. Returns null on any non-200 or
  * unparseable response so callers can fall back to cached / default state.
+ *
+ * @param httpClient
+ * @param token
+ * @param cameraId
  */
 async function fetchLightingState(httpClient, token, cameraId) {
     try {
@@ -95,6 +99,10 @@ async function fetchLightingState(httpClient, token, cameraId) {
  * light groups in the body — callers must merge their delta into a cached
  * full state before passing it here.
  *
+ * @param httpClient
+ * @param token
+ * @param cameraId
+ * @param state
  * @returns the response body parsed into a LightingState on success, or
  * `null` on any non-2xx. The caller should update its cache with this
  * return value to keep the local view in sync with what the camera now
@@ -128,6 +136,8 @@ async function putLightingState(httpClient, token, cameraId, state) {
  * Normalise an arbitrary record into a LightingState, falling back to the
  * default group on any missing / malformed field. Defensive — the field
  * order in Bosch's responses has shifted between firmwares.
+ *
+ * @param raw
  */
 function normaliseLightingState(raw) {
     return {

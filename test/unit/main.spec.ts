@@ -1054,6 +1054,203 @@ describe("main adapter — v0.2.0 command handlers", () => {
         expect(online?.val, "online must be true after successful snapshot").to.equal(true);
     });
 
+    // ── v0.5.2: explicit livestream on/off switch (default OFF) ────────────────
+    //
+    // Bosch counts every open LOCAL session against the daily quota, and the
+    // TLS proxy + RTSP watchdog stay running 24/7 once armed. Forum users
+    // reported the adapter "always streaming" after a fresh install — this
+    // test pins the new opt-in behaviour:
+    //   - On fresh install, cameras.<id>.livestream_enabled defaults to false.
+    //   - With livestream OFF, snapshots still work but must auto-close the
+    //     session + proxy afterwards so nothing keeps running.
+    //   - User-write livestream_enabled=true → opens session + proxy + arms
+    //     watchdog (verified via stream_url getting populated).
+    //   - User-write livestream_enabled=false → tears down (verified via
+    //     stream_url cleared + closeLiveSession call).
+    // Regression target: a single startup snapshot must NOT leave a 24/7
+    // live RTSP stream open against the user's expectation.
+
+    it("livestream_enabled defaults to false on fresh install", async () => {
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+        });
+        await adapter.readyHandler!();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const obj = (await adapter.getObjectAsync!(
+            `cameras.${camId}.livestream_enabled`,
+        )) as ioBroker.StateObject | null | undefined;
+        expect(obj, "livestream_enabled object must exist").to.not.equal(null);
+        expect(obj?.common.def, "default value must be false").to.equal(false);
+        expect(obj?.common.write, "switch must be writable").to.equal(true);
+
+        // Default state value
+        const state = db.getState(
+            `${adapter.namespace}.cameras.${camId}.livestream_enabled`,
+        ) as ioBroker.State | undefined;
+        // setObjectNotExistsAsync seeds either no state or def — neither true counts as "off"
+        expect(state?.val ?? false, "state value must be falsy on fresh install").to.equal(false);
+    });
+
+    it("livestream OFF: startup snapshot tears down session — stream_url empty + closeLiveSession called", async () => {
+        const closeLiveSessionStub = sinon.stub().resolves(undefined);
+        const tlsStopStub = sinon.stub().resolves(undefined);
+        const startTlsProxyStub = sinon.stub().resolves({
+            port: 54321,
+            localRtspUrl: "rtsp://127.0.0.1:54321/rtsp_tunnel",
+            stop: tlsStopStub,
+        });
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            closeLiveSession: closeLiveSessionStub,
+            startTlsProxy: startTlsProxyStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+
+        // Snapshot must have opened the proxy at least once
+        expect(
+            startTlsProxyStub.callCount,
+            "startTlsProxy fired during the startup snapshot",
+        ).to.be.greaterThanOrEqual(1);
+        // …but post-teardown must have stopped it and closed the Bosch session
+        expect(
+            tlsStopStub.callCount,
+            "TLS proxy stop() must run after snapshot when livestream=off",
+        ).to.be.greaterThanOrEqual(1);
+        expect(
+            closeLiveSessionStub.callCount,
+            "closeLiveSession must run after snapshot when livestream=off",
+        ).to.be.greaterThanOrEqual(1);
+
+        // stream_url must be empty after teardown — no consumer should see a stale URL
+        const streamUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url`,
+        ) as ioBroker.State | undefined;
+        expect(streamUrl?.val ?? "", "stream_url must be empty when livestream=off").to.equal("");
+    });
+
+    it("livestream_enabled=true opens session + populates stream_url", async () => {
+        const closeLiveSessionStub = sinon.stub().resolves(undefined);
+        const tlsStopStub = sinon.stub().resolves(undefined);
+        const startTlsProxyStub = sinon.stub().resolves({
+            port: 54321,
+            localRtspUrl: "rtsp://127.0.0.1:54321/rtsp_tunnel",
+            stop: tlsStopStub,
+        });
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            closeLiveSession: closeLiveSessionStub,
+            startTlsProxy: startTlsProxyStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        // Reset before the user toggle so we count only the toggle's effect
+        startTlsProxyStub.resetHistory();
+        closeLiveSessionStub.resetHistory();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.livestream_enabled`;
+
+        // User flips livestream ON
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+
+        // Session must have been opened → TLS proxy spawned → stream_url populated
+        expect(
+            startTlsProxyStub.callCount,
+            "startTlsProxy fires when user enables livestream",
+        ).to.be.greaterThanOrEqual(1);
+        const streamUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url`,
+        ) as ioBroker.State | undefined;
+        expect(
+            (streamUrl?.val as string | undefined) ?? "",
+            "stream_url must be set after livestream_enabled=true",
+        ).to.match(/^rtsp:\/\//);
+
+        // ACK on the switch state itself
+        const switchState = db.getState(stateId) as ioBroker.State | undefined;
+        expect(switchState?.ack, "switch state ack'd after open").to.equal(true);
+        expect(switchState?.val, "switch state reflects user request").to.equal(true);
+    });
+
+    it("livestream_enabled=false tears down — stream_url cleared + closeLiveSession called", async () => {
+        const closeLiveSessionStub = sinon.stub().resolves(undefined);
+        const tlsStopStub = sinon.stub().resolves(undefined);
+        const startTlsProxyStub = sinon.stub().resolves({
+            port: 54321,
+            localRtspUrl: "rtsp://127.0.0.1:54321/rtsp_tunnel",
+            stop: tlsStopStub,
+        });
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            closeLiveSession: closeLiveSessionStub,
+            startTlsProxy: startTlsProxyStub,
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const stateId = `${adapter.namespace}.cameras.${camId}.livestream_enabled`;
+
+        // Bring up the stream first
+        await adapter.stateChangeHandler!(stateId, {
+            val: true,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+
+        // Reset counters after open so we measure only the close path
+        tlsStopStub.resetHistory();
+        closeLiveSessionStub.resetHistory();
+
+        // User flips livestream OFF
+        await adapter.stateChangeHandler!(stateId, {
+            val: false,
+            ack: false,
+            ts: 0,
+            lc: 0,
+            from: "",
+        });
+
+        expect(
+            tlsStopStub.callCount,
+            "TLS proxy stop() fires on livestream_enabled=false",
+        ).to.be.greaterThanOrEqual(1);
+        expect(
+            closeLiveSessionStub.callCount,
+            "closeLiveSession fires on livestream_enabled=false",
+        ).to.be.greaterThanOrEqual(1);
+
+        const streamUrl = db.getState(
+            `${adapter.namespace}.cameras.${camId}.stream_url`,
+        ) as ioBroker.State | undefined;
+        expect(streamUrl?.val ?? "", "stream_url cleared after teardown").to.equal("");
+    });
+
     it("camera flips to offline only after OFFLINE_THRESHOLD consecutive snapshot failures", async () => {
         // 1st call succeeds (camera proven online), then non-transient failures so retry
         // doesn't kick in. Each ioBroker stateChange → snapshot_trigger → 1 fetchSnapshot call.

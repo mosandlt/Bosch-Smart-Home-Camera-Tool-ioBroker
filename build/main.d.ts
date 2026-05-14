@@ -115,6 +115,17 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     private _lightingCache;
     /**
+     * Whether a continuous live RTSP stream is active per camera ID.
+     * Default: false (no livestream on adapter start — Bosch counts every
+     * open session against the daily LOCAL session limit, so we don't want
+     * to burn quota on cameras the user isn't actively watching). When
+     * `cameras.<id>.livestream_enabled` is true, ensureLiveSession() keeps
+     * the Bosch session + TLS proxy + watchdog alive; when false, the
+     * adapter still opens short-lived sessions for snapshots but tears them
+     * down immediately after so no proxy/watchdog stays running.
+     */
+    private _livestreamEnabled;
+    /**
      *
      * @param options
      */
@@ -316,6 +327,8 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      *
      * @param camId   Camera UUID (must be Gen2 with featureSupport.light)
      * @param delta   {brightness?, color?}  — only the changed fields
+     * @param delta.brightness
+     * @param delta.color
      */
     private handleWallwasherUpdate;
     /**
@@ -332,6 +345,30 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * @param quality  "high" or "low"
      */
     private handleStreamQualityChange;
+    /**
+     * Tear down everything that keeps a livestream alive for one camera:
+     * session watchdog, TLS proxy, Bosch live session (DELETE /connection),
+     * and the public stream_url DP. Used by:
+     *   - the livestream toggle (user sets livestream_enabled=false)
+     *   - the one-shot snapshot path when livestream is OFF (auto-cleanup
+     *     so a single snapshot doesn't accidentally start 24/7 streaming).
+     * Best-effort throughout — Bosch may have already closed the session
+     * server-side after a transient network drop.
+     *
+     * @param camId  Camera UUID
+     */
+    private _teardownStream;
+    /**
+     * Start or stop the continuous RTSP livestream for one camera.
+     * Default behaviour for the adapter is OFF — each open Bosch session
+     * counts against the LOCAL daily quota, and the TLS proxy + RTSP
+     * watchdog stay running 24/7 once armed. The user opts in per camera.
+     *
+     * @param camId    Camera UUID
+     * @param enabled  true → ensureLiveSession (session + proxy + watchdog
+     *                          + stream_url), false → _teardownStream
+     */
+    private handleLivestreamToggle;
     /**
      * Fetch fresh events for all known cameras from the Bosch Cloud API.
      *

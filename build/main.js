@@ -166,6 +166,17 @@ class BoschSmartHomeCamera extends utils.Adapter {
      */
     _lightingCache = new Map();
     /**
+     * Whether a continuous live RTSP stream is active per camera ID.
+     * Default: false (no livestream on adapter start — Bosch counts every
+     * open session against the daily LOCAL session limit, so we don't want
+     * to burn quota on cameras the user isn't actively watching). When
+     * `cameras.<id>.livestream_enabled` is true, ensureLiveSession() keeps
+     * the Bosch session + TLS proxy + watchdog alive; when false, the
+     * adapter still opens short-lived sessions for snapshots but tears them
+     * down immediately after so no proxy/watchdog stays running.
+     */
+    _livestreamEnabled = new Map();
+    /**
      *
      * @param options
      */
@@ -588,6 +599,25 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 },
                 native: {},
             });
+            // v0.5.2: explicit on/off switch for the continuous RTSP livestream.
+            // Default OFF so adapter start never auto-opens long-running Bosch
+            // sessions (each open session counts against the daily LOCAL quota
+            // and keeps the TLS proxy + RTSP watchdog running 24/7). Set true
+            // to start streaming; set false to tear down the proxy/watchdog
+            // and free the Bosch session. Snapshots work regardless — they
+            // open a short-lived session that closes right after the JPEG.
+            await this.setObjectNotExistsAsync(`${prefix}.livestream_enabled`, {
+                type: "state",
+                common: {
+                    name: "Continuous RTSP livestream — write true to start, false to stop (default OFF)",
+                    role: "switch.enable",
+                    type: "boolean",
+                    read: true,
+                    write: true,
+                    def: false,
+                },
+                native: {},
+            });
             // v0.5.0: stream quality preference. Toggling this state closes the
             // current LOCAL session and opens a new one with the matching
             // highQualityVideo flag — useful for mobile dashboards / metered
@@ -638,6 +668,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
             await this.upsertState(`${prefix}.hardware_version`, cam.hardwareVersion);
             await this.upsertState(`${prefix}.generation`, cam.generation);
             await this.upsertState(`${prefix}.online`, cam.online);
+            // Seed in-memory livestream flag from the persisted state so a
+            // restart preserves whatever the user toggled before. Default
+            // false when no state exists yet (fresh install).
+            const lsState = await this.getStateAsync(`${prefix}.livestream_enabled`);
+            this._livestreamEnabled.set(cam.id, lsState?.val === true);
         }
     }
     // ── Token persistence ───────────────────────────────────────────────────
@@ -1424,6 +1459,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 case "stream_quality":
                     await this.handleStreamQualityChange(camId, String(state.val));
                     break;
+                case "livestream_enabled":
+                    await this.handleLivestreamToggle(camId, Boolean(state.val));
+                    break;
                 case "siren_active":
                     await this.handleSirenToggle(camId, Boolean(state.val));
                     break;
@@ -1529,6 +1567,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
      *
      * @param camId   Camera UUID (must be Gen2 with featureSupport.light)
      * @param delta   {brightness?, color?}  — only the changed fields
+     * @param delta.brightness
+     * @param delta.color
      */
     async handleWallwasherUpdate(camId, delta) {
         const cam = this._cameras.get(camId);
@@ -1563,7 +1603,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this._lightingCache.set(camId, result);
         this.log.info(`Wallwasher update for camera ${camId.slice(0, 8)}: ` +
             `top brightness=${result.topLedLightSettings.brightness} ` +
-            `color=${result.topLedLightSettings.color ?? "wb=" + result.topLedLightSettings.whiteBalance}`);
+            `color=${result.topLedLightSettings.color ?? `wb=${result.topLedLightSettings.whiteBalance}`}`);
     }
     /**
      * Switch the stream-quality preference for a camera and force a session
@@ -1609,6 +1649,78 @@ class BoschSmartHomeCamera extends utils.Adapter {
         if (watchdog) {
             watchdog.stop();
             this._sessionWatchdogs.delete(camId);
+        }
+    }
+    /**
+     * Tear down everything that keeps a livestream alive for one camera:
+     * session watchdog, TLS proxy, Bosch live session (DELETE /connection),
+     * and the public stream_url DP. Used by:
+     *   - the livestream toggle (user sets livestream_enabled=false)
+     *   - the one-shot snapshot path when livestream is OFF (auto-cleanup
+     *     so a single snapshot doesn't accidentally start 24/7 streaming).
+     * Best-effort throughout — Bosch may have already closed the session
+     * server-side after a transient network drop.
+     *
+     * @param camId  Camera UUID
+     */
+    async _teardownStream(camId) {
+        // Stop watchdog FIRST so it doesn't fire a renewal after we close
+        const watchdog = this._sessionWatchdogs.get(camId);
+        if (watchdog) {
+            watchdog.stop();
+            this._sessionWatchdogs.delete(camId);
+        }
+        // Stop the TLS proxy (frees the bound port)
+        const proxy = this._tlsProxies.get(camId);
+        if (proxy) {
+            try {
+                await proxy.stop();
+            }
+            catch (err) {
+                this.log.debug(`_teardownStream: proxy.stop() for ${camId.slice(0, 8)} threw: ` +
+                    `${err instanceof Error ? err.message : String(err)}`);
+            }
+            this._tlsProxies.delete(camId);
+        }
+        this._sessionRemote.delete(camId);
+        // Close the Bosch live session — frees the LOCAL session slot
+        if (this._liveSessions.has(camId) && this._currentAccessToken) {
+            try {
+                await (0, live_session_1.closeLiveSession)(this._httpClient, this._currentAccessToken, camId);
+            }
+            catch (err) {
+                this.log.debug(`_teardownStream: closeLiveSession for ${camId.slice(0, 8)} threw: ` +
+                    `${err instanceof Error ? err.message : String(err)}`);
+            }
+        }
+        this._liveSessions.delete(camId);
+        // Clear the public stream_url DP so consumers see "no stream"
+        await this.upsertState(`cameras.${camId}.stream_url`, "");
+    }
+    /**
+     * Start or stop the continuous RTSP livestream for one camera.
+     * Default behaviour for the adapter is OFF — each open Bosch session
+     * counts against the LOCAL daily quota, and the TLS proxy + RTSP
+     * watchdog stay running 24/7 once armed. The user opts in per camera.
+     *
+     * @param camId    Camera UUID
+     * @param enabled  true → ensureLiveSession (session + proxy + watchdog
+     *                          + stream_url), false → _teardownStream
+     */
+    async handleLivestreamToggle(camId, enabled) {
+        const previous = this._livestreamEnabled.get(camId) === true;
+        this._livestreamEnabled.set(camId, enabled);
+        if (previous === enabled) {
+            return; // no-op
+        }
+        if (enabled) {
+            // Open Bosch session + spawn TLS proxy + arm watchdog + populate stream_url
+            await this.ensureLiveSession(camId);
+            this.log.info(`Livestream STARTED for camera ${camId.slice(0, 8)}`);
+        }
+        else {
+            await this._teardownStream(camId);
+            this.log.info(`Livestream STOPPED for camera ${camId.slice(0, 8)}`);
         }
     }
     /**
@@ -1870,34 +1982,49 @@ class BoschSmartHomeCamera extends utils.Adapter {
     async handleSnapshotTrigger(camId) {
         const session = await this.ensureLiveSession(camId);
         const snapUrl = (0, snapshot_1.buildSnapshotUrl)(session.proxyUrl);
-        let buf;
+        // v0.5.2: when livestream is OFF (default), a snapshot must NOT leave
+        // a long-running session + proxy + watchdog behind. We tear those
+        // down in `finally` regardless of snapshot success/failure so a
+        // single snap.jpg can't accidentally pin a 24/7 stream open.
+        const livestreamOn = this._livestreamEnabled.get(camId) === true;
         try {
-            buf = await (0, snapshot_1.fetchSnapshot)(snapUrl, session.digestUser, session.digestPassword);
-        }
-        catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            // Only retry on "aborted" / connection-reset errors — not on auth (401)
-            // or non-image content type (no point retrying those).
-            const isTransient = /abort|reset|ECONNRESET|socket hang up|timeout/i.test(msg);
-            if (!isTransient) {
-                await this.markCameraReachability(camId, false);
-                throw err;
-            }
-            this.log.debug(`Snapshot retry for ${camId.slice(0, 8)}: ${msg}`);
-            await new Promise((r) => setTimeout(r, 800));
+            let buf;
             try {
                 buf = await (0, snapshot_1.fetchSnapshot)(snapUrl, session.digestUser, session.digestPassword);
             }
-            catch (retryErr) {
-                await this.markCameraReachability(camId, false);
-                throw retryErr;
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                // Only retry on "aborted" / connection-reset errors — not on auth (401)
+                // or non-image content type (no point retrying those).
+                const isTransient = /abort|reset|ECONNRESET|socket hang up|timeout/i.test(msg);
+                if (!isTransient) {
+                    await this.markCameraReachability(camId, false);
+                    throw err;
+                }
+                this.log.debug(`Snapshot retry for ${camId.slice(0, 8)}: ${msg}`);
+                await new Promise((r) => setTimeout(r, 800));
+                try {
+                    buf = await (0, snapshot_1.fetchSnapshot)(snapUrl, session.digestUser, session.digestPassword);
+                }
+                catch (retryErr) {
+                    await this.markCameraReachability(camId, false);
+                    throw retryErr;
+                }
+            }
+            const filePath = `cameras/${camId}/snapshot.jpg`;
+            await this.writeFileAsync(this.namespace, filePath, buf);
+            await this.setStateAsync(`cameras.${camId}.snapshot_path`, `/${this.namespace}/${filePath}`, true);
+            await this.markCameraReachability(camId, true);
+            this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
+        }
+        finally {
+            if (!livestreamOn) {
+                await this._teardownStream(camId).catch((err) => {
+                    this.log.debug(`Snapshot post-teardown for ${camId.slice(0, 8)} threw: ` +
+                        `${err instanceof Error ? err.message : String(err)}`);
+                });
             }
         }
-        const filePath = `cameras/${camId}/snapshot.jpg`;
-        await this.writeFileAsync(this.namespace, filePath, buf);
-        await this.setStateAsync(`cameras.${camId}.snapshot_path`, `/${this.namespace}/${filePath}`, true);
-        await this.markCameraReachability(camId, true);
-        this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
     }
     /**
      * Start the polling fallback: re-fetch /v11/events every 30 s.
