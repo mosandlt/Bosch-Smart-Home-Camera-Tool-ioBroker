@@ -165,6 +165,20 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      */
     constructor(options?: Partial<utils.AdapterOptions>);
     /**
+     * v0.5.4: handle sendTo messages from Admin UI.
+     *
+     * Commands:
+     *   - "getLoginUrl": return the current info.login_url value so the Admin
+     *     UI can render a "Login bei Bosch" button that opens the URL in a
+     *     new tab without forcing the user to copy a 300-char log line.
+     *   - "resetLogin": clear all OAuth state (tokens, PKCE pair, pasted URL)
+     *     and generate a fresh login URL. Used when a user is stuck in an
+     *     auth_error loop or wants to log in with a different Bosch account.
+     *
+     * @param obj Inbound ioBroker message from Admin (carries command, from, callback).
+     */
+    private onMessage;
+    /**
      * Write a state only if the value changed (iobroker.ring upsertState pattern).
      * Always creates the object if it doesn't exist yet, then sets ack=true.
      *
@@ -564,6 +578,16 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * @param camId
      * @param reachable
      */
+    /**
+     * v0.5.4: Bosch returns timestamps in Java's ZonedDateTime#toString format
+     * — "2026-05-15T06:51:47.604+02:00[Europe/Berlin]". The trailing
+     * `[zone-id]` is IETF/Java-only and breaks any standard ISO 8601 parser
+     * including JavaScript's `new Date()`. Strip it so consumers can parse.
+     *
+     * @param raw Bosch timestamp (e.g. from /v11/events `timestamp` field).
+     * @returns ISO 8601 string, or the input unchanged if no zone suffix.
+     */
+    private static normaliseBoschTimestamp;
     private markCameraReachability;
     /**
      * Called when the adapter is stopped.

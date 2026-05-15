@@ -222,6 +222,81 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this.on("ready", this.onReady.bind(this));
         this.on("stateChange", this.onStateChange.bind(this));
         this.on("unload", this.onUnload.bind(this));
+        this.on("message", this.onMessage.bind(this));
+    }
+    /**
+     * v0.5.4: handle sendTo messages from Admin UI.
+     *
+     * Commands:
+     *   - "getLoginUrl": return the current info.login_url value so the Admin
+     *     UI can render a "Login bei Bosch" button that opens the URL in a
+     *     new tab without forcing the user to copy a 300-char log line.
+     *   - "resetLogin": clear all OAuth state (tokens, PKCE pair, pasted URL)
+     *     and generate a fresh login URL. Used when a user is stuck in an
+     *     auth_error loop or wants to log in with a different Bosch account.
+     *
+     * @param obj Inbound ioBroker message from Admin (carries command, from, callback).
+     */
+    async onMessage(obj) {
+        if (!obj || typeof obj !== "object") {
+            return;
+        }
+        if (obj.command === "getLoginUrl") {
+            const state = await this.getStateAsync("info.login_url");
+            const url = typeof state?.val === "string" ? state.val : "";
+            if (obj.callback) {
+                if (url) {
+                    this.sendTo(obj.from, obj.command, { openUrl: url }, obj.callback);
+                }
+                else {
+                    this.sendTo(obj.from, obj.command, {
+                        error: "Already logged in or login URL not yet generated. Use 'Reset login' to start a fresh login.",
+                    }, obj.callback);
+                }
+            }
+            return;
+        }
+        if (obj.command === "resetLogin") {
+            try {
+                // Clear persisted tokens + paste field so a fresh PKCE cycle
+                // starts on the next adapter restart.
+                await this.setStateAsync("info.access_token", "", true);
+                await this.setStateAsync("info.refresh_token", "", true);
+                await this.setStateAsync("info.token_expires_at", 0, true);
+                await this.setStateAsync("info.pkce_verifier", "", true);
+                await this.setStateAsync("info.pkce_state", "", true);
+                await this.setStateAsync("info.login_url", "", true);
+                await this.setStateAsync("info.connection", false, true);
+                await this.setStateAsync("info.connection_status", "logged_out", true);
+                try {
+                    await this.extendForeignObjectAsync(`system.adapter.${this.namespace}`, {
+                        native: { redirect_url: "" },
+                    });
+                }
+                catch {
+                    this.log.debug("resetLogin: could not clear redirect_url — non-fatal");
+                }
+                this._currentAccessToken = null;
+                this._currentRefreshToken = null;
+                this.log.info("Login state reset — adapter will restart to begin a fresh login.");
+                if (obj.callback) {
+                    this.sendTo(obj.from, obj.command, {
+                        result: "ok",
+                        message: "Login state cleared. The adapter is restarting.",
+                    }, obj.callback);
+                }
+                // Trigger a restart so onReady re-runs the showLoginUrl path.
+                this.terminate("Login reset requested via Admin UI", 11);
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.log.error(`resetLogin failed: ${msg}`);
+                if (obj.callback) {
+                    this.sendTo(obj.from, obj.command, { error: msg }, obj.callback);
+                }
+            }
+            return;
+        }
     }
     // ── State helpers ───────────────────────────────────────────────────────
     /**
@@ -351,6 +426,56 @@ class BoschSmartHomeCamera extends utils.Adapter {
             common: {
                 role: "text",
                 name: "OIDC state parameter (CSRF protection — internal)",
+                type: "string",
+                read: true,
+                write: false,
+                def: "",
+            },
+            native: {},
+        });
+        // v0.5.4: surface the Bosch OAuth URL as a datapoint so the Admin UI
+        // can render it as a clickable link instead of forcing users to fish
+        // a 300-char log line out of the Log Inspector (Forum #84538 feedback).
+        await this.setObjectNotExistsAsync("info.login_url", {
+            type: "state",
+            common: {
+                role: "url",
+                name: "Bosch OAuth login URL — open in browser when set",
+                type: "string",
+                read: true,
+                write: false,
+                def: "",
+            },
+            native: {},
+        });
+        // v0.5.4: text state for richer connection diagnostics than the boolean
+        // info.connection — Blockly / VIS can branch on the specific phase.
+        await this.setObjectNotExistsAsync("info.connection_status", {
+            type: "state",
+            common: {
+                role: "indicator.state",
+                name: "Adapter login phase (logged_out | awaiting_login | connected | auth_error)",
+                type: "string",
+                read: true,
+                write: false,
+                def: "logged_out",
+                states: {
+                    logged_out: "logged out",
+                    awaiting_login: "awaiting login",
+                    connected: "connected",
+                    auth_error: "auth error",
+                },
+            },
+            native: {},
+        });
+        // v0.5.4: timestamp of the most recent successful token mint (either
+        // fresh PKCE login or silent refresh). Helps users diagnose how stale
+        // the refresh_token is — Bosch's offline_access tokens live ~30 days.
+        await this.setObjectNotExistsAsync("info.last_login_at", {
+            type: "state",
+            common: {
+                role: "date",
+                name: "Timestamp of last successful Bosch token mint (ISO 8601)",
                 type: "string",
                 read: true,
                 write: false,
@@ -787,6 +912,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.upsertState("info.access_token", tokens.access_token);
         await this.upsertState("info.refresh_token", tokens.refresh_token);
         await this.upsertState("info.token_expires_at", expiresAt);
+        // v0.5.4: diagnostics — both Blockly and VIS dashboards can branch on these.
+        await this.setStateAsync("info.last_login_at", new Date().toISOString(), true);
+        await this.setStateAsync("info.connection_status", "connected", true);
     }
     /**
      * Load tokens from ioBroker states (from a previous run).
@@ -1122,7 +1250,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
         let state;
         if (existingVerifier && existingVerifier.length > 10) {
             // Reuse stored verifier — derive challenge from it
-            const { createHash, randomBytes } = await Promise.resolve().then(() => __importStar(require("crypto")));
+            const { createHash, randomBytes } = await Promise.resolve().then(() => __importStar(require("node:crypto")));
             verifier = existingVerifier;
             challenge = createHash("sha256").update(verifier).digest("base64url");
             const existingState = (await this.getStateAsync("info.pkce_state"))?.val;
@@ -1133,7 +1261,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
         }
         else {
             // Generate a fresh PKCE pair
-            const { randomBytes } = await Promise.resolve().then(() => __importStar(require("crypto")));
+            const { randomBytes } = await Promise.resolve().then(() => __importStar(require("node:crypto")));
             const pair = (0, auth_1.generatePkcePair)();
             verifier = pair.verifier;
             challenge = pair.challenge;
@@ -1142,6 +1270,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
             await this.setStateAsync("info.pkce_state", state, true);
         }
         const authUrl = (0, auth_1.buildAuthUrl)(challenge, state);
+        // v0.5.4: publish URL as a state so the Admin UI can render a clickable
+        // link. Survives adapter restarts (PKCE verifier is also persisted) so
+        // the user doesn't have to time the login between two restart cycles.
+        await this.setStateAsync("info.login_url", authUrl, true);
+        await this.setStateAsync("info.connection_status", "awaiting_login", true);
         this.log.info("Login required. Open this URL in your browser and log in to Bosch:");
         this.log.info(authUrl);
         this.log.info("After Bosch redirects you, copy the full redirect URL " +
@@ -1189,6 +1322,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // Clear stored PKCE pair (verifier consumed — regenerate fresh on next login)
         await this.setStateAsync("info.pkce_verifier", "", true);
         await this.setStateAsync("info.pkce_state", "", true);
+        // v0.5.4: hide the Admin-UI login link once login succeeded
+        await this.setStateAsync("info.login_url", "", true);
         this.log.info("Login successful — tokens stored. Adapter is now connected.");
         return tokens;
     }
@@ -1262,8 +1397,29 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     catch (err) {
                         const msg = err instanceof Error ? err.message : String(err);
                         this.log.error(`Login failed: ${msg}`);
+                        // v0.5.4: do NOT terminate — that produces the "kaputt"
+                        // restart-loop the forum complained about (Forum #84538).
+                        // Instead: clear the stale paste, drop the stale PKCE
+                        // pair, regenerate a fresh login URL into info.login_url
+                        // so the Admin UI button works, and stay alive waiting
+                        // for the next paste.
+                        try {
+                            await this.extendForeignObjectAsync(`system.adapter.${this.namespace}`, {
+                                native: {
+                                    redirect_url: "",
+                                },
+                            });
+                        }
+                        catch {
+                            // Non-fatal — the user can clear redirect_url manually
+                            this.log.debug("Could not auto-clear stale redirect_url — non-fatal");
+                        }
+                        await this.setStateAsync("info.pkce_verifier", "", true);
+                        await this.setStateAsync("info.pkce_state", "", true);
                         await this.setStateAsync("info.connection", false, true);
-                        this.terminate("Login failed — check Admin UI redirect_url field", 11);
+                        await this.setStateAsync("info.connection_status", "auth_error", true);
+                        await this.showLoginUrl();
+                        this.log.info("Stay-alive in awaiting-login mode — open info.login_url or the 'Open Bosch Login' button to retry.");
                         return;
                     }
                 }
@@ -1328,6 +1484,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.subscribeStatesAsync("cameras.*");
         // ── Step 4: Mark connected + arm refresh loop ──────────────────────
         await this.upsertState("info.connection", true);
+        await this.setStateAsync("info.connection_status", "connected", true);
         this.scheduleTokenRefresh(tokens.expires_in * 1000);
         // ── Step 4b: Auto-snapshot per camera to flip `online` from default ─
         // ensureCameraObjects() seeds `online=false` (list endpoint lacks the
@@ -1624,7 +1781,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
      */
     async onFcmEvent(ev) {
         const prefix = `cameras.${ev.cameraId}`;
-        await this.setStateAsync(`${prefix}.last_motion_at`, ev.timestamp, true);
+        await this.setStateAsync(`${prefix}.last_motion_at`, BoschSmartHomeCamera.normaliseBoschTimestamp(ev.timestamp), true);
         await this.setStateAsync(`${prefix}.last_motion_event_type`, ev.eventType, true);
         this.log.info(`FCM event [${ev.eventType}] for camera ${ev.cameraId.slice(0, 8)} at ${ev.timestamp}`);
         await this._onMotionFired(ev.cameraId);
@@ -1997,8 +2154,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     eventType = rawType.toLowerCase() || "motion";
                 }
                 // Timestamp — prefer ISO string, fall back to current time
-                const ts = (newest.timestamp ?? newest.createdAt ?? "") ||
+                const rawTs = (newest.timestamp ?? newest.createdAt ?? "") ||
                     new Date().toISOString();
+                const ts = BoschSmartHomeCamera.normaliseBoschTimestamp(rawTs);
                 const prefix = `cameras.${camId}`;
                 await this.setStateAsync(`${prefix}.last_motion_at`, ts, true);
                 await this.setStateAsync(`${prefix}.last_motion_event_type`, eventType, true);
@@ -2290,6 +2448,21 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * @param camId
      * @param reachable
      */
+    /**
+     * v0.5.4: Bosch returns timestamps in Java's ZonedDateTime#toString format
+     * — "2026-05-15T06:51:47.604+02:00[Europe/Berlin]". The trailing
+     * `[zone-id]` is IETF/Java-only and breaks any standard ISO 8601 parser
+     * including JavaScript's `new Date()`. Strip it so consumers can parse.
+     *
+     * @param raw Bosch timestamp (e.g. from /v11/events `timestamp` field).
+     * @returns ISO 8601 string, or the input unchanged if no zone suffix.
+     */
+    static normaliseBoschTimestamp(raw) {
+        if (typeof raw !== "string") {
+            return raw;
+        }
+        return raw.replace(/\[[^\]]+\]$/, "");
+    }
     async markCameraReachability(camId, reachable) {
         if (reachable) {
             if (this._snapshotFailCount.get(camId)) {
@@ -2297,6 +2470,22 @@ class BoschSmartHomeCamera extends utils.Adapter {
             }
             await this.setStateAsync(`cameras.${camId}.online`, true, true);
             return;
+        }
+        // v0.5.4: privacy_enabled=true makes the camera refuse snapshots — that is
+        // a USER state, not a reachability problem. Don't count those failures
+        // toward the offline threshold; without this guard, an indoor camera in
+        // permanent privacy mode drifts to online=false after 3 startup probes
+        // even though the Bosch cloud happily syncs its config.
+        try {
+            const priv = await this.getStateAsync(`cameras.${camId}.privacy_enabled`);
+            if (priv?.val === true) {
+                this.log.debug(`Skipping reachability decrement for ${camId.slice(0, 8)} — privacy mode is ON`);
+                return;
+            }
+        }
+        catch {
+            // Fall through — if we can't read the privacy state, treat the
+            // failure normally so a truly unreachable camera still flips offline.
         }
         const failures = (this._snapshotFailCount.get(camId) ?? 0) + 1;
         this._snapshotFailCount.set(camId, failures);

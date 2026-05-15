@@ -17,8 +17,8 @@
         "_login_instructions": {
           "type": "staticText",
           "text": {
-            "en": "The login URL is printed automatically into the adapter log on every start. Find it in ioBroker → Log Inspector (filter by 'bosch-smart-home-camera') — look for the line starting with 'Login required. Open this URL in your browser…'. Copy that URL, open it in your browser, log in to your Bosch account (solve any captcha/MFA). Bosch then redirects your browser to https://www.bosch.com/boschcam?code=XXX&state=YYY — copy that full URL from the browser address bar.",
-            "de": "Die Login-URL wird bei jedem Adapter-Start automatisch ins Log geschrieben. Zu finden in ioBroker → Log Inspector (Filter 'bosch-smart-home-camera') — die Zeile beginnt mit 'Login required. Open this URL in your browser…'. Diese URL kopieren, im Browser öffnen und mit dem Bosch-Konto einloggen (Captcha/MFA lösen). Bosch leitet dich anschließend zu https://www.bosch.com/boschcam?code=XXX&state=YYY weiter — diese vollständige URL aus der Adressleiste des Browsers kopieren."
+            "en": "Open Objects → bosch-smart-home-camera.0 → info → login_url and click the value to launch the Bosch login. Log in with your Bosch account (captcha / MFA), then Bosch redirects your browser to https://www.bosch.com/boschcam?code=XXX&state=YYY — copy that full URL from the address bar and paste it below.",
+            "de": "Öffne Objekte → bosch-smart-home-camera.0 → info → login_url und klicke auf den Wert, um den Bosch-Login zu starten. Mit dem Bosch-Konto einloggen (Captcha/MFA), anschließend leitet Bosch zu https://www.bosch.com/boschcam?code=XXX&state=YYY weiter — diese vollständige URL aus der Adressleiste kopieren und unten einfügen."
           },
           "newLine": true,
           "xs": 12,
@@ -26,6 +26,75 @@
           "md": 12,
           "lg": 12,
           "xl": 12
+        },
+        "_login_button": {
+          "type": "sendTo",
+          "command": "getLoginUrl",
+          "label": {
+            "en": "Open Bosch Login in browser",
+            "de": "Bosch-Login im Browser öffnen"
+          },
+          "openUrl": true,
+          "variant": "contained",
+          "color": "primary",
+          "useNative": false,
+          "newLine": true,
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 4,
+          "xl": 4
+        },
+        "_login_url_state": {
+          "type": "state",
+          "oid": "info.login_url",
+          "label": {
+            "en": "Bosch login URL (manual fallback)",
+            "de": "Bosch Login-URL (manueller Fallback)"
+          },
+          "controlType": "text",
+          "newLine": true,
+          "xs": 12,
+          "sm": 12,
+          "md": 12,
+          "lg": 12,
+          "xl": 12
+        },
+        "_reset_login_button": {
+          "type": "sendTo",
+          "command": "resetLogin",
+          "label": {
+            "en": "Reset login (clear tokens & restart)",
+            "de": "Login zurücksetzen (Token löschen & neu starten)"
+          },
+          "confirm": {
+            "condition": "true",
+            "text": {
+              "en": "This clears all Bosch tokens and restarts the adapter. You will need to log in again. Continue?",
+              "de": "Hiermit werden alle Bosch-Token gelöscht und der Adapter neu gestartet. Ein erneuter Login ist nötig. Fortfahren?"
+            },
+            "title": {
+              "en": "Reset login?",
+              "de": "Login zurücksetzen?"
+            },
+            "ok": {
+              "en": "Reset",
+              "de": "Zurücksetzen"
+            },
+            "cancel": {
+              "en": "Cancel",
+              "de": "Abbrechen"
+            }
+          },
+          "variant": "outlined",
+          "color": "secondary",
+          "useNative": false,
+          "newLine": true,
+          "xs": 12,
+          "sm": 6,
+          "md": 4,
+          "lg": 4,
+          "xl": 4
         },
         "_info_step2": {
           "type": "header",
