@@ -43,7 +43,7 @@
     "@aracna/fcm": "^1.0.32",
     "@iobroker/adapter-core": "^3.3.2",
     "axios": "^1.9.0",
-    "axios-cookiejar-support": "^6.0.5",
+    "axios-cookiejar-support": "^7.0.0",
     "tough-cookie": "^6.0.1"
   },
   "devDependencies": {
