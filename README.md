@@ -172,6 +172,20 @@ What works:
 - Encrypted credential storage (`encryptedNative` — js-controller encrypts the refresh token at rest)
 - ~320 unit tests passing
 
+### Architecture
+
+```mermaid
+flowchart LR
+    Cam[Bosch Cameras<br/>Gen1 + Gen2<br/>HTTPS :443] -->|TLS tunnel| Proxy[Adapter TLS proxy<br/>127.0.0.1:&lt;port&gt;]
+    Cloud[Bosch CBS API<br/>residential.cbs<br/>.boschsecurity.com] -->|FCM push<br/>OAuth2 PKCE<br/>REST: events / video_inputs<br/>/ lighting / privacy| Adapter
+    Adapter[ioBroker Adapter<br/>Node.js] --> DPs[(Encrypted DPs<br/>encryptedNative)]
+    Proxy --> Adapter
+    DPs --> VIS[VIS / VIS-2<br/>Dashboard]
+    DPs --> Blockly[Blockly / JS<br/>automations]
+    Proxy -.->|rtsp://...<br/>LAN-bind opt| Recorders[BlueIris / Frigate<br/>iobroker.cameras]
+    Adapter -->|file-store| Snapshots[snapshot.jpg<br/>last_event_image]
+```
+
 ## Setup
 
 1. **Install** the adapter and create an instance (the adapter starts in "waiting for login" mode).
@@ -186,6 +200,28 @@ What works:
 6. The adapter restarts, exchanges the auth code for tokens, fetches your cameras, and starts the FCM listener. Future restarts skip the browser step as long as the stored refresh token is still valid.
 
 If the refresh token is ever rejected (after a Bosch password change or extended downtime), the adapter logs a new login URL and you repeat steps 2–5.
+
+### OAuth2 PKCE login flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User (browser)
+    participant A as ioBroker Adapter
+    participant B as Bosch SingleKey ID
+
+    A->>A: generate PKCE verifier + state
+    A->>U: log login URL (challenge + state)
+    U->>B: open URL, enter credentials, solve captcha/MFA
+    B->>U: redirect to bosch.com/boschcam?code=...&state=...
+    U->>A: paste callback URL into Admin UI
+    A->>B: POST /token (code + PKCE verifier)
+    B-->>A: access_token + refresh_token
+    A->>A: AES-encrypt + persist (info.access_token / info.refresh_token / info.fcm_creds)
+    A->>B: GET /v11/video_inputs (with bearer)
+    B-->>A: camera list
+    A->>A: build per-camera DP tree, start FCM listener
+```
 
 ## Dashboard
 
@@ -206,6 +242,23 @@ See [`docs/vis-2-example/README.md`](./docs/vis-2-example/README.md) for the
 walkthrough, including how to swap the camera UUIDs and how to wire go2rtc /
 HLS for low-latency live video instead of the default snapshot refresh.
 
+### Motion / event flow (camera → DP → automation)
+
+```mermaid
+flowchart TD
+    Cam[Camera detects motion<br/>or audio alarm] -->|FCM push<br/>MTalk/MCS| L[Adapter FCM listener<br/>_aracna/fcm_]
+    L -->|persistent_id dedup| F{fetchEvents<br/>GET /v11/events}
+    F -->|new event| N[normalize event:<br/>id, type, tags, timestamp]
+    N --> C{eventTags / type}
+    C -->|MOVEMENT + PERSON| EP[last_event_type=person<br/>motion_active=true 90s]
+    C -->|MOVEMENT| EM[last_event_type=movement<br/>motion_active=true 90s]
+    C -->|AUDIO_ALARM| EA[last_event_type=audio_alarm]
+    EP & EM & EA --> S[fetch snapshot<br/>→ snapshot.jpg<br/>→ last_event_image base64]
+    EP & EM & EA --> T[Blockly / JS trigger]
+    T -->|sendTo notify| Out[Telegram / Signal /<br/>Pushover / e-mail]
+    L -.->|register fail<br/>3x| Poll[Polling fallback<br/>every 30s<br/>info.fcm_active=polling]
+```
+
 ## Blockly examples
 
 Import-ready Blockly scripts for the most common automations live in
@@ -224,6 +277,15 @@ itself, either use the snapshot refresh in the example dashboard or bridge
 via go2rtc → WebRTC/HLS.
 
 ### External recorders (BlueIris, Frigate)
+
+```mermaid
+flowchart LR
+    Cam[Bosch Camera<br/>192.168.x.y:443<br/>HTTPS only] -->|RTSP-over-TLS<br/>tunneled| Proxy[Adapter TLS proxy<br/>port: per-camera<br/>bind: 127.0.0.1 or LAN]
+    Proxy -->|rtsp://user:pwd@<br/>host:&lt;port&gt;/rtsp_tunnel<br/>?inst=1&enableaudio=1| B[BlueIris]
+    Proxy -->|rtsp://...?inst=1| F[Frigate]
+    Proxy -->|rtsp://...?inst=2 sub| ICam[iobroker.cameras]
+    Cloud[Bosch CBS API] -.->|hourly session renew<br/>~60s before timeout| Proxy
+```
 
 By default the proxy listens on `127.0.0.1` — reachable from the ioBroker
 host itself but not from another machine. To use a recorder on a separate
@@ -299,7 +361,7 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.4.1 · HA Quality Scale **Platinum** · production-ready |
+| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.4.2 · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
 | 🟢 **ioBroker Adapter** (this repo) | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.6.0 · beta · npm |
 
