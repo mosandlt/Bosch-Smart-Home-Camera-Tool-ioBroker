@@ -58,7 +58,7 @@
     "@types/tough-cookie": "^4.0.5",
     "@typescript-eslint/eslint-plugin": "^8.29.1",
     "@typescript-eslint/parser": "^8.29.1",
-    "eslint": "^9.24.0",
+    "eslint": "^10.3.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   },
