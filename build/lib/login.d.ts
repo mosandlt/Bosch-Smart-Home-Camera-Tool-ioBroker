@@ -52,6 +52,7 @@ import { type TokenResult } from "./auth";
 export declare class InvalidCredentialsError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message?: string);
 }
@@ -64,6 +65,7 @@ export declare class InvalidCredentialsError extends Error {
 export declare class MfaRequiredError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message?: string);
 }
@@ -71,6 +73,7 @@ export declare class MfaRequiredError extends Error {
 export declare class LoginFlowError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message: string);
 }
@@ -113,6 +116,7 @@ export declare function detectCaptcha(html: string): boolean;
 export declare function detectMfa(html: string): boolean;
 /**
  *
+ * @param html
  */
 export declare function extractFormAction(html: string): string | null;
 /**

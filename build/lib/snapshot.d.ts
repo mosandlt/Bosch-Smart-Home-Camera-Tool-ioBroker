@@ -19,6 +19,11 @@
  */
 export declare class SnapshotError extends Error {
     readonly cause?: unknown;
+    /**
+     *
+     * @param message
+     * @param cause
+     */
     constructor(message: string, cause?: unknown);
 }
 /**

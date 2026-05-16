@@ -104,6 +104,8 @@ export declare class RcpError extends Error {
     readonly command: string;
     /**
      *
+     * @param code
+     * @param command
      */
     constructor(code: string, command: string);
 }
@@ -114,6 +116,8 @@ export declare class RcpNetworkError extends Error {
     readonly status: number | undefined;
     /**
      *
+     * @param status
+     * @param message
      */
     constructor(status: number | undefined, message: string);
 }

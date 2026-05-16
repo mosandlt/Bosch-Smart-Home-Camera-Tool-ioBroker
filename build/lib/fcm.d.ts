@@ -118,6 +118,8 @@ export declare class FcmCbsRegistrationError extends Error {
     readonly httpStatus: number;
     /**
      *
+     * @param httpStatus
+     * @param message
      */
     constructor(httpStatus: number, message: string);
 }
@@ -128,6 +130,8 @@ export declare class FcmRegistrationError extends Error {
     readonly cause?: unknown | undefined;
     /**
      *
+     * @param message
+     * @param cause
      */
     constructor(message: string, cause?: unknown | undefined);
 }
@@ -199,6 +203,10 @@ export declare class FcmListener extends EventEmitter {
     private _clientHandle;
     /**
      *
+     * @param httpClient
+     * @param bearerToken
+     * @param options
+     * @param deps
      */
     constructor(httpClient: AxiosInstance, bearerToken: string, options?: FcmListenerOptions, deps?: Partial<FcmDeps>);
     /**

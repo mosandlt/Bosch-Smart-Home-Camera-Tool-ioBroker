@@ -98,6 +98,7 @@ exports.CLOUD_API = "https://residential.cbs.boschsecurity.com";
 class RefreshTokenInvalidError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message) {
         super(message);
@@ -112,6 +113,7 @@ exports.RefreshTokenInvalidError = RefreshTokenInvalidError;
 class AuthServerOutageError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message) {
         super(message);

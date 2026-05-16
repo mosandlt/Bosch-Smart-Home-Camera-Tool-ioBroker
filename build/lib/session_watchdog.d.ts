@@ -58,6 +58,10 @@ export declare class SessionWatchdog {
     private _session;
     private _timer;
     private _running;
+    /**
+     *
+     * @param opts
+     */
     constructor(opts: SessionWatchdogOptions);
     /**
      * Start the watchdog with the given initial session.
@@ -81,6 +85,8 @@ export declare class SessionWatchdog {
      * expiresAt = session.openedAt + session.maxSessionDuration * 1000
      * timerDelay = expiresAt - now - renewLeadMs
      * Minimum delay: 1 ms (fire immediately if already past the lead time).
+     *
+     * @param session
      */
     private _arm;
     /** Perform the renewal: open a new session, invoke onRenew, re-arm. */

@@ -131,6 +131,8 @@ export interface RcpResponse {
 export class RcpError extends Error {
     /**
      *
+     * @param code
+     * @param command
      */
     constructor(
         public readonly code: string,
@@ -147,6 +149,8 @@ export class RcpError extends Error {
 export class RcpNetworkError extends Error {
     /**
      *
+     * @param status
+     * @param message
      */
     constructor(
         public readonly status: number | undefined,

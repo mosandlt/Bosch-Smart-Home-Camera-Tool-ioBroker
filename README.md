@@ -1,6 +1,6 @@
 # ioBroker.bosch-smart-home-camera
 
-ioBroker adapter for Bosch Smart Home Cameras (Eyes Außenkamera, 360 Innenkamera, Gen2 Eyes Indoor II + Outdoor II) — beta. The full core feature set is functional end-to-end and verified live against real hardware.
+ioBroker adapter for Bosch Smart Home Cameras (Eyes Outdoor, 360 Indoor, Gen2 Eyes Indoor II + Outdoor II) — beta. The full core feature set is functional end-to-end and verified live against real hardware.
 
 > **No official API.** This adapter uses the reverse-engineered Bosch Cloud API, discovered via mitmproxy traffic analysis of the official Bosch Smart Camera app.
 
@@ -51,7 +51,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |
 | **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP |
 | **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ❌ | ❌ |
-| **Dual-stream URL (main + sub)** | ❌ | ❌ | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
+| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ❌ | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
 | **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option |
 | **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP |
 | **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP |
@@ -73,7 +73,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` |
 | **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* |
 | **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs |
-| **UI languages** | DE · EN · FR · NL · IT · ES | EN only (CLI output) | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN |
+| **UI languages** | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-Hans *(v12.4.0)* | EN only (CLI output) | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN |
 
 **Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
 
@@ -83,6 +83,17 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 ---
 
 ## Changelog
+
+### 0.6.0 (2026-05-16)
+Security hardening + reliability round. Prepares the codebase for the official ioBroker repository PR.
+
+- **OAuth tokens + PKCE secrets are AES-encrypted at rest** via the ioBroker system secret. Before v0.6.0, anyone with read access to the adapter namespace could see the 30-day `refresh_token` in plaintext via the Admin Objects tab. Migration is automatic on first start: any plaintext value found in `info.access_token` / `info.refresh_token` / `info.pkce_verifier` / `info.pkce_state` is re-written in encrypted form transparently.
+- **FCM credentials persisted across restarts** (`info.fcm_creds`, encrypted). Previously every adapter start triggered a full re-registration: fresh ECDH key pair, fresh ACG id, fresh CBS `POST /v11/devices`. Now the listener replays the saved credentials and skips the handshake — saves ~1 s startup latency and a round-trip.
+- **Camera-state poll runs per-camera in parallel** (`Promise.all`). With 4 cameras the per-tick wall-clock drops from ~N × 250 ms to ~250 ms. Each camera owns its own DP namespace, so concurrent writes don't race.
+- **Timer hygiene**: `motion_active` auto-clear (90 s) and snapshot-idle teardown (60 s) now use adapter-core's `this.setTimeout` / `this.clearTimeout`, so adapter unload cancels them reliably.
+- **Snapshot-saved log line is now `debug`** (was `info`) — it was firing on every motion event and flooding logs on busy installations.
+- **+51 unit tests** covering the new encryption paths, FCM credential persistence, livestream toggle teardown, event processing dedup, siren / wallwasher handlers, idle teardown window, and reachability tracker. 436 tests total, 0 failing.
+- **README cleaned** for the ioBroker repository PR: localised product names normalised to English, duplicate Changelog section merged into a single block, admin icon scaled to 200×200, Node 24 added to the CI matrix.
 
 ### 0.5.5 (2026-05-16)
 Two forum-driven bugfixes reported against v0.5.4 on the ioBroker forum (post #1339866).
@@ -124,7 +135,7 @@ Per-camera livestream switch — default OFF.
 Adds Gen2 siren + RGB wallwasher colour, plus the v0.5.0 forum-driven fixes:
 
 - **Siren** (Gen2 only): new `cameras.<id>.siren_active` boolean DP. Write `true` to trigger the integrated 75 dB siren (panic alarm), `false` to silence. Backed by `PUT /v11/video_inputs/{id}/panic_alarm` with `{status: "ON"|"OFF"}` — the same endpoint the official Bosch app uses.
-- **RGB wallwasher** (Gen2 outdoor with `featureSupport.light=true`, i.e. Eyes Außenkamera II): two new DPs — `cameras.<id>.wallwasher_color` (HEX `#RRGGBB`, empty string = warm white mode) and `cameras.<id>.wallwasher_brightness` (0…100). Drives both top and bottom LED groups in unison via `PUT /v11/video_inputs/{id}/lighting/switch`. The front spotlight stays untouched (controlled by `front_light_enabled` as before).
+- **RGB wallwasher** (Gen2 outdoor with `featureSupport.light=true`, i.e. Eyes Outdoor II): two new DPs — `cameras.<id>.wallwasher_color` (HEX `#RRGGBB`, empty string = warm white mode) and `cameras.<id>.wallwasher_brightness` (0…100). Drives both top and bottom LED groups in unison via `PUT /v11/video_inputs/{id}/lighting/switch`. The front spotlight stays untouched (controlled by `front_light_enabled` as before).
 - Privacy state now syncs back from the Bosch app: every 30 s the adapter refetches `/v11/video_inputs` and mirrors `privacyMode` into `cameras.<id>.privacy_enabled`. Previously, setting privacy via the app left the ioBroker DP stale (forum #84538).
 - `stream_url` now embeds Digest credentials and Bosch query params (`rtsp://<user>:<password>@host:port/rtsp_tunnel?inst=1&enableaudio=1&fmtp=1&maxSessionDuration=…`) so external recorders (BlueIris, Frigate, `iobroker.cameras`) no longer get "401 Unauthorized" on connect.
 - TLS-proxy port is sticky across session renewals and adapter restarts (persisted in `cameras.<id>._proxy_port`). External recorders no longer need URL reconfiguration after each hourly Bosch session refresh.
@@ -137,8 +148,7 @@ Adds Gen2 siren + RGB wallwasher colour, plus the v0.5.0 forum-driven fixes:
 - RTSP session watchdog: LOCAL Bosch sessions renew automatically ~60 s before `maxSessionDuration` expires — BlueIris and similar 24/7 recorders no longer see an hourly stream drop
 - Cloud-relay media paths fully removed: adapter enforces LOCAL-only for all media (RTSP + snapshots); if the camera is unreachable on the LAN a clear error is logged — no silent fallback to `proxy-NN.live.cbs.boschsecurity.com:42090`
 
-### 0.3.3 (2026-05-13)
-FCM resilience + token refresh on startup. Single Bosch OSS Firebase API key, per-mode failure surfacing, auto-snapshot at start, polling fallback.
+Older releases (0.0.1 – 0.3.3) are archived in [CHANGELOG_OLD.md](./CHANGELOG_OLD.md).
 
 ## Status
 
@@ -289,71 +299,11 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 
 | Implementation | Repo | Status |
 |---|---|---|
-| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.3.1 · HA Quality Scale **Platinum** · production-ready |
+| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.4.1 · HA Quality Scale **Platinum** · production-ready |
 | 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
 | 🟢 **ioBroker Adapter** (this repo) | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.5.5 · beta · npm |
 
 HA stays the **reference implementation** — features land there first; the Python CLI and this adapter catch up over time.
-
-## Changelog
-
-<!-- @alcalzone/release-script inserts new entries under the WIP placeholder. -->
-<!-- Older releases archived in CHANGELOG_OLD.md. -->
-
-### **WORK IN PROGRESS**
-
-### 0.3.3 (2026-05-13)
-- Single OSS Firebase API key for both iOS and Android registration paths — retired APK-extracted keys
-- FCM diagnostic logging: new `mode-failed` event surfaces HTTP status + URL + Google error message (replaces silent catch in `_tryStart`)
-- Polling fallback like the HA integration: when both modes fail `info.fcm_active="polling"` (not `error`) and `/v11/events` is polled every 30 s — adapter stays usable
-- Auto-snapshot per camera at adapter start so `cameras.<id>.online` flips from default `false` to real state immediately
-- Startup token refresh via stored `refresh_token` before falling back to PKCE — eliminates `No PKCE verifier stored` crash after long downtime
-- Polling-fallback `setInterval` is `unref()`'d so mocha exits cleanly when FCM mock fails
-
-### 0.3.2 (2026-05-13)
-- Repochecker compliance round 2–3 — see `io-package.json` news for detail
-- `.releaseconfig.json` now included in npm tarball (E5018)
-- `.commitinfo` explicitly listed in `.gitignore` (E9006)
-- All built-in `node:` prefix imports (S5043)
-- `.vscode/settings.json` with correct ioBroker schema URLs
-- `.github/dependabot.yml` with 7-day cooldown
-- eslint v9 migration: `eslint.config.mjs` + `@iobroker/eslint-config`
-- `axios-cookiejar-support` pinned to `^6.0.5` for Node 20 CI compatibility
-- 310 tests passing, 0 lint errors
-
-
-### 0.3.1 (2026-05-13)
-- Auto-snapshot fetch after `privacy_enabled=false` or `light_enabled` toggle so dashboards reflect the new state immediately
-- `cameras.<id>.online` now reflects snapshot reachability (true on success, false after 3 consecutive failures — guards against transient Gen2 "stream has been aborted" hiccups)
-- VIS-2 example dashboard (`docs/vis-2-example/`): canvas height 800→900, `tplBulbOnOff` (vis-1) → `tplJquiBool` (vis-2 native) so toggles render correctly, status bar with `Connection: / FCM:` prefixes
-- Dependencies bumped: `@iobroker/adapter-core` 3.2.2 → 3.3.2, `@iobroker/testing` 4.1.3 → 5.2.2, `@iobroker/adapter-dev` 1.3.0 → 1.5.0
-- `io-package.json`: `js-controller` min version 5.0.19 → 6.0.11, `admin` ≥7.6.17 added to `globalDependencies`, `encryptedNative`/`protectedNative` moved from `/common` to root (schema compliance)
-- GitHub Actions workflow split into `check-and-lint` + `adapter-tests` + `deploy` jobs, concurrency cancellation, proper tag patterns
-- `admin/jsonConfig.json`: full `xs/sm/md/lg/xl` size attributes on all interactive fields
-
-### 0.3.0 (2026-05-13)
-- FCM push listener (real implementation): `@aracna/fcm@1.0.32` MTalk/MCS replaces v0.2.0 stub
-- `fetchAndProcessEvents()` polls `/v11/events` on each FCM wake-up, dedup'd via `_lastSeenEventId`
-- Gen2 PERSON upgrade in event normalisation (`eventType=MOVEMENT + eventTags=["PERSON"]` → `"person"`)
-- `info.fcm_active` lifecycle: `healthy` / `error` / `disconnected` / `stopped`
-- Image rotation: removed dead RCP+ 0x0810 WRITE (401 on Gen2 FW 9.40.25); flag now pure client-side
-- 299 unit tests passing
-
-### 0.2.0 (2026-05-13)
-- `handlePrivacyToggle` / `handleLightToggle` / `handleImageRotationToggle` via Cloud API
-- `handleSnapshotTrigger` opens live session → fetches JPEG → writes to adapter file-store
-- `ensureLiveSession()` cache with 30 s TTL + auto-reopen
-- `startTlsProxy` per camera → `cameras.<id>.stream_url = rtsp://127.0.0.1:PORT/rtsp_tunnel`
-
-### 0.1.0 (2026-05-12)
-- First functional release — programmatic OAuth login via Bosch SingleKey ID
-- Camera discovery via `/v11/video_inputs`, token auto-refresh loop, `info.*` state tree
-- Library code for RCP+ protocol (`rcp.ts`) and snap.jpg fetcher (`snapshot.ts`) included as preview
-
-### 0.0.1 (2026-05-12)
-- Initial skeleton — namespace reservation, not yet functional
-
-Full per-release diff: [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

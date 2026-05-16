@@ -101,6 +101,7 @@ const crypto = __importStar(require("node:crypto"));
 class InvalidCredentialsError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message = "Invalid credentials") {
         super(message);
@@ -117,6 +118,7 @@ exports.InvalidCredentialsError = InvalidCredentialsError;
 class MfaRequiredError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message = "MFA or additional verification required") {
         super(message);
@@ -128,6 +130,7 @@ exports.MfaRequiredError = MfaRequiredError;
 class LoginFlowError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message) {
         super(message);
@@ -222,6 +225,7 @@ function detectMfa(html) {
 // (tests that stub a Keycloak-style form with explicit action= still pass).
 /**
  *
+ * @param html
  */
 function extractFormAction(html) {
     const match = html.match(/<form[^>]+action="([^"]+)"/i);

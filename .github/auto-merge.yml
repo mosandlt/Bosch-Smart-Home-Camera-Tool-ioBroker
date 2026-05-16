@@ -1,0 +1,18 @@
+# pascalgn/automerge-action style config — referenced by the ioBroker
+# adapter checker (S8914). The actual merge logic lives in
+# .github/workflows/automerge-dependabot.yml which uses the
+# GitHub-native "gh pr merge --auto" path (works without this file).
+# This config exists so any future switch to pascalgn-action would
+# Just Work, and so the checker's S8914 suggestion stays satisfied.
+
+- match:
+    dependency_type: development
+    update_type: "semver:patch"
+
+- match:
+    dependency_type: development
+    update_type: "semver:minor"
+
+- match:
+    dependency_type: production
+    update_type: "semver:patch"

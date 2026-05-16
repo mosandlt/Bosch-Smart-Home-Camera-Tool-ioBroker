@@ -171,9 +171,14 @@ function createAdapter(configOverrides: Record<string, unknown> = {}): {
 
     const adapter = capturedAdapter as TestAdapter;
 
-    // Stub methods that the @iobroker/testing mock omits:
+    // Stub methods that the @iobroker/testing mock omits.
+    // v0.6.0: setTimeout now returns a real handle (not null) so the timer-map
+    // tests (`_motionActiveTimers.has(...)` / `_snapshotIdleTimers.has(...)`)
+    // observe the registered entries. The fn body itself is never invoked
+    // in unit tests because mocha completes long before any 60–90 s timer
+    // would fire.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (adapter as any).setTimeout = (_fn: () => void, _ms: number) => null;
+    (adapter as any).setTimeout = (_fn: () => void, _ms: number) => ({ __mockTimer: true });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).clearTimeout = (_handle: unknown) => undefined;
     // The mock's terminate() throws an Error object which propagates from onReady;

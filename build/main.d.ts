@@ -188,6 +188,30 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
     private upsertState;
     /** Ensure the info channel + connection/token states exist. */
     private ensureInfoObjects;
+    private static readonly SECRET_PREFIX;
+    private _encryptSecret;
+    private _decryptSecret;
+    /**
+     * One-shot migration for users upgrading from <=v0.5.x: re-encrypt any
+     * plaintext token / PKCE secret found in state storage and overwrite the
+     * state with the AES-wrapped form. Idempotent — already-encrypted values
+     * are skipped.
+     */
+    private _migrateLegacySecrets;
+    /**
+     * Read + decrypt + JSON-parse the persisted FCM credentials. Returns null
+     * if the state is empty, the ciphertext is unusable, or the payload is
+     * not the expected shape — the caller falls back to a fresh registration.
+     */
+    private _loadSavedFcmCredentials;
+    /**
+     * Encrypt + persist FCM credentials so the next adapter start can replay
+     * them as `savedCredentials`. JSON-stringify so the FcmRawCredentials blob
+     * (ECDH key + ACG id/token + auth secret) round-trips intact.
+     *
+     * @param creds
+     */
+    private _saveFcmCredentials;
     /**
      * Create the cameras device + one channel per camera.
      * Uses setObjectNotExistsAsync to preserve user history config.
@@ -260,6 +284,7 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      *
      * @param proxy
      * @param session
+     * @param instance
      */
     private _buildStreamUrl;
     /**
@@ -315,6 +340,13 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * privacy_enabled; light fields live on /lighting and aren't polled).
      */
     private _pollCameraStateOnce;
+    /**
+     * Per-camera body of `_pollCameraStateOnce` (extracted for `Promise.all`).
+     *
+     * @param token
+     * @param cam
+     */
+    private _pollSingleCameraState;
     /**
      * Called whenever a subscribed state changes.
      * Only acts on ack=false states (user commands, not adapter-reported values).
@@ -418,7 +450,11 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * @param camId  Camera UUID
      */
     private _armSnapshotIdleTeardown;
-    /** Cancel the pending idle-teardown timer for one camera, if any. */
+    /**
+     * Cancel the pending idle-teardown timer for one camera, if any.
+     *
+     * @param camId
+     */
     private _cancelSnapshotIdleTeardown;
     /**
      * Tear down everything that keeps a livestream alive for one camera:
@@ -555,6 +591,8 @@ declare class BoschSmartHomeCamera extends utils.Adapter {
      * HA integration's snap.jpg retry pattern.
      *
      * @param camId
+     * @param opts
+     * @param opts.asMotionEvent
      */
     private handleSnapshotTrigger;
     /**

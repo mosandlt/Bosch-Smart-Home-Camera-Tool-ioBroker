@@ -37,6 +37,11 @@ const auth_1 = require("./auth");
  */
 class LiveSessionError extends Error {
     cause;
+    /**
+     *
+     * @param message
+     * @param cause
+     */
     constructor(message, cause) {
         super(message);
         this.name = "LiveSessionError";
@@ -51,6 +56,10 @@ exports.LiveSessionError = LiveSessionError;
  * the camera comes back online.
  */
 class CameraOfflineError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message) {
         super(message);
         this.name = "CameraOfflineError";
@@ -62,6 +71,10 @@ exports.CameraOfflineError = CameraOfflineError;
  * The caller should back off and retry after closing unused sessions.
  */
 class SessionLimitError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message) {
         super(message);
         this.name = "SessionLimitError";
@@ -106,6 +119,7 @@ function buildProxyUrl(urlEntry, imageUrlScheme) {
  * @param httpClient  Axios instance (caller controls SSL/timeout options)
  * @param token       Bearer access token
  * @param cameraId    Camera UUID
+ * @param highQualityVideo
  * @returns LiveSession on success (always LOCAL)
  * @throws CameraOfflineError  when camera is offline / privacy mode on (503, 443-privacy)
  * @throws SessionLimitError   when Bosch quota hit (444)

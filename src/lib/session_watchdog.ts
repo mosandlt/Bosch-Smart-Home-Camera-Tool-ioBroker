@@ -68,6 +68,10 @@ export class SessionWatchdog {
     private _timer: ReturnType<typeof setTimeout> | null = null;
     private _running = false;
 
+    /**
+     *
+     * @param opts
+     */
     constructor(opts: SessionWatchdogOptions) {
         this._openSession = opts.openSession;
         this._onRenew = opts.onRenew;
@@ -116,6 +120,8 @@ export class SessionWatchdog {
      * expiresAt = session.openedAt + session.maxSessionDuration * 1000
      * timerDelay = expiresAt - now - renewLeadMs
      * Minimum delay: 1 ms (fire immediately if already past the lead time).
+     *
+     * @param session
      */
     private _arm(session: LiveSession): void {
         if (!this._running) {

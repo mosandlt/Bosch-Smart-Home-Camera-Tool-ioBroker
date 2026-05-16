@@ -1,8 +1,21 @@
 {
   "common": {
     "name": "bosch-smart-home-camera",
-    "version": "0.5.5",
+    "version": "0.6.0",
     "news": {
+      "0.6.0": {
+        "en": "Beta release. OAuth tokens and PKCE secrets now AES-encrypted at rest (auto-migration on first start). FCM credentials persisted across restarts (no more full re-registration handshake every start). Camera-state poll runs parallel per camera. motion_active and snapshot-idle timers use adapter-core for clean unload. +51 unit tests, 436 total. README cleaned for ioBroker repo PR.",
+        "de": "Beta-Release. OAuth-Tokens und PKCE-Secrets jetzt AES-verschlüsselt (Migration beim ersten Start). FCM-Credentials restart-fest persistiert (kein Full-Re-Register-Handshake pro Start mehr). Kamera-State-Poll läuft parallel pro Kamera. motion_active- und snapshot-idle-Timer nutzen adapter-core für sauberes Unload. +51 Unit-Tests, 436 gesamt. README für ioBroker-Repo-PR aufgeräumt.",
+        "ru": "Beta релиз. OAuth-токены и PKCE-секреты теперь AES-зашифрованы (миграция при первом запуске). FCM-креденшилы сохраняются между перезапусками. Опрос состояния камер параллельно. motion_active/snapshot-idle таймеры используют adapter-core. +51 unit-тест, 436 всего.",
+        "pt": "Release beta. Tokens OAuth e segredos PKCE agora AES-criptografados (migração no primeiro start). Credenciais FCM persistem entre reinicializações. Poll de estado das câmeras em paralelo. Timers motion_active/snapshot-idle usam adapter-core. +51 testes, 436 no total.",
+        "nl": "Beta release. OAuth tokens en PKCE secrets nu AES-encrypted (migratie bij eerste start). FCM credentials persistent tussen restarts. Camera state poll parallel. motion_active/snapshot-idle timers via adapter-core. +51 unit tests, 436 totaal.",
+        "fr": "Version beta. Tokens OAuth et secrets PKCE chiffrés AES (migration au premier démarrage). Credentials FCM persistent entre redémarrages. Poll d'état des caméras en parallèle. Timers motion_active/snapshot-idle via adapter-core. +51 tests, 436 au total.",
+        "it": "Release beta. Token OAuth e segreti PKCE ora AES-crittografati (migrazione al primo avvio). Credenziali FCM persistono tra riavvii. Poll stato camere in parallelo. Timer motion_active/snapshot-idle via adapter-core. +51 test, 436 totali.",
+        "es": "Release beta. Tokens OAuth y secretos PKCE ahora cifrados AES (migración en primer arranque). Credenciales FCM persisten entre reinicios. Poll de estado de cámaras en paralelo. Timers motion_active/snapshot-idle vía adapter-core. +51 tests, 436 en total.",
+        "pl": "Wydanie beta. Tokeny OAuth i sekrety PKCE szyfrowane AES (migracja przy pierwszym starcie). Poświadczenia FCM utrwalane między restartami. Poll stanu kamer równolegle. Timery motion_active/snapshot-idle przez adapter-core. +51 testów, 436 łącznie.",
+        "uk": "Beta-реліз. OAuth-токени та PKCE-секрети тепер AES-шифровані (міграція при першому запуску). FCM-облікові зберігаються між перезапусками. Опитування стану камер паралельне. Таймери motion_active/snapshot-idle через adapter-core. +51 тест, 436 всього.",
+        "zh-cn": "Beta 版本。OAuth 令牌和 PKCE 秘密现在 AES 加密（首次启动时迁移）。FCM 凭据在重启之间持久化。摄像头状态轮询并行执行。motion_active/snapshot-idle 计时器使用 adapter-core。新增 51 个测试，共 436 个。"
+      },
       "0.5.5": {
         "en": "Beta release — two forum-driven bugfixes from #1339866. (1) motion_active DP now flips true on every motion/person/audio_alarm event even when FCM is unavailable and the adapter runs on the /v11/events polling fallback (info.fcm_active='polling'). Previously last_motion_at updated correctly but motion_active stayed false, breaking Blockly automations that listened for the rising edge. (2) Light state (front_light_enabled, wallwasher_enabled) now syncs back from the Bosch app: the 30 s state poll derives the boolean DPs from the brightness values reported by /lighting/switch, so app-side toggles propagate to ioBroker within ~30 s instead of staying stale until the next adapter restart.",
         "de": "Beta-Release — zwei Forum-Bugfixes aus #1339866. (1) motion_active DP kippt jetzt auch dann auf true wenn der Adapter im /v11/events-Polling-Fallback läuft (info.fcm_active='polling', FCM-Registrierung fehlgeschlagen). Vorher: last_motion_at wurde aktualisiert, motion_active blieb permanent false — Blockly-Automationen mit Edge-Trigger funktionierten nicht. (2) Lichtstatus (front_light_enabled, wallwasher_enabled) synct jetzt aus der Bosch-App zurück: der 30-Sekunden-State-Poll leitet die Boolean-DPs aus den Helligkeitswerten von /lighting/switch ab, App-Toggles propagieren nach ~30 s nach ioBroker statt erst beim nächsten Adapter-Restart.",
@@ -93,19 +106,6 @@
         "pl": "Odporność FCM: pojedynczy oficjalny klucz OSS Firebase Bosch dla rejestracji iOS i Android, zastępuje wycofane klucze z APK. Błędy per tryb pokazują teraz prawdziwą przyczynę przez nowe zdarzenie 'mode-failed' (koniec z silent catch). Auto-snapshot przy starcie adaptera dla każdej kamery, aby cameras.<id>.online od razu odzwierciedlał prawdziwy stan. Jeśli rejestracja push zawiedzie dla obu trybów, adapter przechodzi na polling /v11/events co 30 s (info.fcm_active='polling'), jak integracja HA z fcm_push_mode=polling.",
         "uk": "Стійкість FCM: тепер лише один офіційний Bosch OSS Firebase API ключ для реєстрації iOS і Android, замість виведених з APK ключів. Помилки за режимом тепер показують справжню причину через нову подію 'mode-failed' (більше ніякого silent catch). Авто-знімок при старті адаптера для кожної камери, щоб cameras.<id>.online одразу відображав реальний стан. Якщо реєстрація push зазнала невдачі для обох режимів, адаптер переходить до опитування /v11/events кожні 30 с (info.fcm_active='polling'), як HA-інтеграція з fcm_push_mode=polling.",
         "zh-cn": "FCM 韧性：iOS 和 Android 注册都改用单一的官方 Bosch OSS Firebase API 密钥，替代已停用的从 APK 提取的密钥。每模式失败现在通过新的 'mode-failed' 事件显示真实原因（不再静默 catch）。适配器启动时为每个摄像头自动抓取快照，使 cameras.<id>.online 立即反映真实状态。如果两种模式的 push 注册都失败，适配器现在每 30 秒轮询 /v11/events（info.fcm_active='polling'），与 HA 集成的 fcm_push_mode=polling 行为一致。"
-      },
-      "0.3.2": {
-        "en": "Repochecker compliance round 2-3: node: prefix on built-in imports, .vscode + dependabot config, eslint v9 migration with @iobroker/eslint-config, .releaseconfig.json now included in npm tarball, axios-cookiejar-support pinned to v6 for Node 20 CI compat. No behaviour changes — 310 tests still passing.",
-        "de": "Repochecker-Compliance Runde 2-3: node: Präfix für Built-in-Imports, .vscode + Dependabot Konfig, eslint v9 Migration mit @iobroker/eslint-config, .releaseconfig.json nun im npm Tarball, axios-cookiejar-support auf v6 fixiert für Node 20 CI-Kompatibilität. Keine Verhaltensänderungen — 310 Tests weiterhin grün.",
-        "ru": "Соответствие Repochecker раунд 2-3: префикс node: для встроенных импортов, конфиги .vscode + dependabot, миграция на eslint v9 с @iobroker/eslint-config, .releaseconfig.json теперь в npm tarball, axios-cookiejar-support зафиксирован на v6 для совместимости Node 20 CI. Изменений поведения нет — 310 тестов проходят.",
-        "pt": "Conformidade Repochecker rodada 2-3: prefixo node: em imports built-in, configs .vscode + dependabot, migração eslint v9 com @iobroker/eslint-config, .releaseconfig.json agora incluído no tarball npm, axios-cookiejar-support fixado em v6 para compatibilidade Node 20 CI. Sem mudanças de comportamento — 310 testes ainda passando.",
-        "nl": "Repochecker compliance ronde 2-3: node: prefix op built-in imports, .vscode + dependabot config, eslint v9 migratie met @iobroker/eslint-config, .releaseconfig.json nu inbegrepen in npm tarball, axios-cookiejar-support vastgepind op v6 voor Node 20 CI compat. Geen gedragsveranderingen — 310 tests blijven slagen.",
-        "fr": "Conformité Repochecker tour 2-3 : préfixe node: sur les imports built-in, configs .vscode + dependabot, migration eslint v9 avec @iobroker/eslint-config, .releaseconfig.json inclus dans le tarball npm, axios-cookiejar-support épinglé à v6 pour la compatibilité Node 20 CI. Aucun changement de comportement — 310 tests toujours OK.",
-        "it": "Conformità Repochecker round 2-3: prefisso node: per gli import built-in, config .vscode + dependabot, migrazione eslint v9 con @iobroker/eslint-config, .releaseconfig.json ora incluso nel tarball npm, axios-cookiejar-support fissato a v6 per compatibilità Node 20 CI. Nessun cambio di comportamento — 310 test ancora superati.",
-        "es": "Cumplimiento Repochecker ronda 2-3: prefijo node: en imports built-in, configs .vscode + dependabot, migración eslint v9 con @iobroker/eslint-config, .releaseconfig.json ahora incluido en el tarball npm, axios-cookiejar-support fijado a v6 para compat Node 20 CI. Sin cambios de comportamiento — 310 tests siguen pasando.",
-        "pl": "Zgodność z Repochecker runda 2-3: prefiks node: dla wbudowanych importów, konfig .vscode + dependabot, migracja eslint v9 z @iobroker/eslint-config, .releaseconfig.json teraz w tarballu npm, axios-cookiejar-support zablokowany na v6 dla kompat Node 20 CI. Bez zmian zachowania — 310 testów nadal przechodzi.",
-        "uk": "Сумісність з Repochecker раунд 2-3: префікс node: для вбудованих імпортів, конфіги .vscode + dependabot, міграція на eslint v9 з @iobroker/eslint-config, .releaseconfig.json тепер у npm tarball, axios-cookiejar-support зафіксовано на v6 для сумісності Node 20 CI. Без змін поведінки — 310 тестів проходять.",
-        "zh-cn": "Repochecker 合规第 2-3 轮：内置导入使用 node: 前缀，.vscode + dependabot 配置，迁移到 eslint v9 配合 @iobroker/eslint-config，.releaseconfig.json 现在包含在 npm tarball 中，axios-cookiejar-support 固定在 v6 以保证 Node 20 CI 兼容性。无行为变化 — 310 个测试仍通过。"
       }
     },
     "titleLang": {
@@ -210,7 +210,7 @@
       "type": "state",
       "common": {
         "role": "text",
-        "name": "Current Bosch SingleKey ID access token (sensitive — DO NOT share)",
+        "name": "Encrypted Bosch SingleKey ID access token (AES via ioBroker system secret — never plaintext from v0.6.0)",
         "type": "string",
         "read": true,
         "write": false,
@@ -223,7 +223,7 @@
       "type": "state",
       "common": {
         "role": "text",
-        "name": "Current Bosch SingleKey ID refresh token (sensitive — DO NOT share)",
+        "name": "Encrypted Bosch SingleKey ID refresh token (AES via ioBroker system secret — never plaintext from v0.6.0)",
         "type": "string",
         "read": true,
         "write": false,
@@ -245,16 +245,15 @@
       "native": {}
     },
     {
-      "_id": "info.last_login_ago",
+      "_id": "info.fcm_creds",
       "type": "state",
       "common": {
-        "role": "value.time",
-        "name": "Seconds since last successful login",
-        "type": "number",
+        "role": "json",
+        "name": "Persisted FCM credentials (ECDH key + ACG creds) so a restart does not re-register against Bosch CBS / Google FCM",
+        "type": "string",
         "read": true,
         "write": false,
-        "def": 0,
-        "unit": "s"
+        "def": ""
       },
       "native": {}
     },

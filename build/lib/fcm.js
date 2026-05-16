@@ -64,6 +64,8 @@ class FcmCbsRegistrationError extends Error {
     httpStatus;
     /**
      *
+     * @param httpStatus
+     * @param message
      */
     constructor(httpStatus, message) {
         super(message);
@@ -79,6 +81,8 @@ class FcmRegistrationError extends Error {
     cause;
     /**
      *
+     * @param message
+     * @param cause
      */
     constructor(message, cause) {
         super(message);
@@ -108,6 +112,10 @@ class FcmListener extends node_events_1.EventEmitter {
     _clientHandle = null;
     /**
      *
+     * @param httpClient
+     * @param bearerToken
+     * @param options
+     * @param deps
      */
     constructor(httpClient, bearerToken, options, deps) {
         super();

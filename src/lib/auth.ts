@@ -107,6 +107,7 @@ export interface PkcePair {
 export class RefreshTokenInvalidError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message: string) {
         super(message);
@@ -121,6 +122,7 @@ export class RefreshTokenInvalidError extends Error {
 export class AuthServerOutageError extends Error {
     /**
      *
+     * @param message
      */
     constructor(message: string) {
         super(message);

@@ -37,6 +37,11 @@ import { CLOUD_API } from "./auth";
 export class LiveSessionError extends Error {
     public readonly cause?: unknown;
 
+    /**
+     *
+     * @param message
+     * @param cause
+     */
     constructor(message: string, cause?: unknown) {
         super(message);
         this.name = "LiveSessionError";
@@ -51,6 +56,10 @@ export class LiveSessionError extends Error {
  * the camera comes back online.
  */
 export class CameraOfflineError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string) {
         super(message);
         this.name = "CameraOfflineError";
@@ -62,6 +71,10 @@ export class CameraOfflineError extends Error {
  * The caller should back off and retry after closing unused sessions.
  */
 export class SessionLimitError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string) {
         super(message);
         this.name = "SessionLimitError";
@@ -152,6 +165,7 @@ function buildProxyUrl(urlEntry: string, imageUrlScheme?: string): string {
  * @param httpClient  Axios instance (caller controls SSL/timeout options)
  * @param token       Bearer access token
  * @param cameraId    Camera UUID
+ * @param highQualityVideo
  * @returns LiveSession on success (always LOCAL)
  * @throws CameraOfflineError  when camera is offline / privacy mode on (503, 443-privacy)
  * @throws SessionLimitError   when Bosch quota hit (444)

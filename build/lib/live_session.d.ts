@@ -31,6 +31,11 @@ import type { AxiosInstance } from "axios";
  */
 export declare class LiveSessionError extends Error {
     readonly cause?: unknown;
+    /**
+     *
+     * @param message
+     * @param cause
+     */
     constructor(message: string, cause?: unknown);
 }
 /**
@@ -40,6 +45,10 @@ export declare class LiveSessionError extends Error {
  * the camera comes back online.
  */
 export declare class CameraOfflineError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string);
 }
 /**
@@ -47,6 +56,10 @@ export declare class CameraOfflineError extends Error {
  * The caller should back off and retry after closing unused sessions.
  */
 export declare class SessionLimitError extends Error {
+    /**
+     *
+     * @param message
+     */
     constructor(message: string);
 }
 /** Result of a successful openLiveSession() call. Always LOCAL. */
@@ -106,6 +119,7 @@ export interface LiveSession {
  * @param httpClient  Axios instance (caller controls SSL/timeout options)
  * @param token       Bearer access token
  * @param cameraId    Camera UUID
+ * @param highQualityVideo
  * @returns LiveSession on success (always LOCAL)
  * @throws CameraOfflineError  when camera is offline / privacy mode on (503, 443-privacy)
  * @throws SessionLimitError   when Bosch quota hit (444)

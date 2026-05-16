@@ -185,6 +185,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * every time. Cleared eagerly on _teardownStream, livestream toggle ON,
      * and onUnload.
      */
+    // v0.6.0: ioBroker.Timeout (from this.setTimeout) — adapter-core auto-cancels on unload.
     _snapshotIdleTimers = new Map();
     /**
      * Idle window after a snapshot before the session is torn down (ms).
@@ -200,6 +201,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * clean rising/falling edge to listen on. Re-armed (window slides) on
      * every follow-up event within the window.
      */
+    // v0.6.0: ioBroker.Timeout (from this.setTimeout) — adapter-core auto-cancels on unload.
     _motionActiveTimers = new Map();
     /**
      * How long `cameras.<id>.motion_active` stays true after the last
@@ -483,6 +485,134 @@ class BoschSmartHomeCamera extends utils.Adapter {
             },
             native: {},
         });
+        // v0.6.0: persisted FCM credentials (ECDH key + ACG creds). Saved on
+        // every `registered` event from FcmListener and replayed via
+        // `savedCredentials` on next adapter start to avoid a fresh ECDH /
+        // ACG / CBS POST roundtrip on every restart.
+        await this.setObjectNotExistsAsync("info.fcm_creds", {
+            type: "state",
+            common: {
+                role: "json",
+                name: "Persisted FCM credentials (encrypted, sensitive)",
+                type: "string",
+                read: true,
+                write: false,
+                def: "",
+            },
+            native: {},
+        });
+    }
+    // ── Secret encryption (v0.6.0) ───────────────────────────────────────────
+    // Sensitive states (access_token, refresh_token, pkce_verifier, pkce_state,
+    // fcm_creds) are wrapped with the ioBroker system secret. Stored values
+    // start with the SECRET_PREFIX so legacy plaintext entries from <=v0.5.x
+    // can be detected, decrypted in-place once, and overwritten on first read.
+    static SECRET_PREFIX = "__enc__";
+    _encryptSecret(plain) {
+        if (!plain) {
+            return "";
+        }
+        // adapter-core provides this.encrypt at runtime; the unit-test
+        // MockAdapter omits it, so fall back to a plaintext pass-through there.
+        // Production always has it (verified by integration test).
+        const encrypt = this.encrypt;
+        if (typeof encrypt !== "function") {
+            return plain;
+        }
+        return BoschSmartHomeCamera.SECRET_PREFIX + encrypt.call(this, plain);
+    }
+    _decryptSecret(stored) {
+        if (typeof stored !== "string" || stored === "") {
+            return "";
+        }
+        if (stored.startsWith(BoschSmartHomeCamera.SECRET_PREFIX)) {
+            const decrypt = this.decrypt;
+            if (typeof decrypt !== "function") {
+                // Test-mode pass-through; production never reaches this branch.
+                return stored.slice(BoschSmartHomeCamera.SECRET_PREFIX.length);
+            }
+            try {
+                return decrypt.call(this, stored.slice(BoschSmartHomeCamera.SECRET_PREFIX.length));
+            }
+            catch (err) {
+                this.log.warn(`Could not decrypt persisted secret — discarding stale ciphertext (${err instanceof Error ? err.message : String(err)})`);
+                return "";
+            }
+        }
+        // Legacy plaintext from <=v0.5.x — return as-is so the adapter keeps
+        // working on first run; the next write (saveTokens / showLoginUrl)
+        // will overwrite the state with the encrypted form.
+        return stored;
+    }
+    /**
+     * One-shot migration for users upgrading from <=v0.5.x: re-encrypt any
+     * plaintext token / PKCE secret found in state storage and overwrite the
+     * state with the AES-wrapped form. Idempotent — already-encrypted values
+     * are skipped.
+     */
+    async _migrateLegacySecrets() {
+        const sensitiveIds = [
+            "info.access_token",
+            "info.refresh_token",
+            "info.pkce_verifier",
+            "info.pkce_state",
+        ];
+        let migrated = 0;
+        for (const id of sensitiveIds) {
+            try {
+                const st = await this.getStateAsync(id);
+                const val = typeof st?.val === "string" ? st.val : "";
+                if (val && !val.startsWith(BoschSmartHomeCamera.SECRET_PREFIX)) {
+                    await this.setStateAsync(id, this._encryptSecret(val), true);
+                    migrated++;
+                }
+            }
+            catch {
+                // State does not exist yet (fresh install) — skip silently.
+            }
+        }
+        if (migrated > 0) {
+            this.log.info(`v0.6.0: migrated ${migrated} legacy plaintext secret state${migrated === 1 ? "" : "s"} to encrypted storage`);
+        }
+    }
+    /**
+     * Read + decrypt + JSON-parse the persisted FCM credentials. Returns null
+     * if the state is empty, the ciphertext is unusable, or the payload is
+     * not the expected shape — the caller falls back to a fresh registration.
+     */
+    async _loadSavedFcmCredentials() {
+        try {
+            const st = await this.getStateAsync("info.fcm_creds");
+            const plain = this._decryptSecret(st?.val);
+            if (!plain) {
+                return null;
+            }
+            const parsed = JSON.parse(plain);
+            if (typeof parsed?.fcmToken === "string" &&
+                parsed.fcmToken.length > 0 &&
+                (parsed.mode === "ios" || parsed.mode === "android") &&
+                parsed.raw &&
+                typeof parsed.raw === "object") {
+                this.log.debug("Replaying persisted FCM credentials — skipping fresh registration");
+                return parsed;
+            }
+            return null;
+        }
+        catch (err) {
+            this.log.debug(`Persisted FCM credentials not usable (${err instanceof Error ? err.message : String(err)}) — fresh registration`);
+            return null;
+        }
+    }
+    /**
+     * Encrypt + persist FCM credentials so the next adapter start can replay
+     * them as `savedCredentials`. JSON-stringify so the FcmRawCredentials blob
+     * (ECDH key + ACG id/token + auth secret) round-trips intact.
+     *
+     * @param creds
+     */
+    async _saveFcmCredentials(creds) {
+        const payload = JSON.stringify(creds);
+        await this.setStateAsync("info.fcm_creds", this._encryptSecret(payload), true);
     }
     /**
      * Create the cameras device + one channel per camera.
@@ -909,8 +1039,10 @@ class BoschSmartHomeCamera extends utils.Adapter {
         const expiresAt = Date.now() + tokens.expires_in * 1000;
         this._currentAccessToken = tokens.access_token;
         this._currentRefreshToken = tokens.refresh_token;
-        await this.upsertState("info.access_token", tokens.access_token);
-        await this.upsertState("info.refresh_token", tokens.refresh_token);
+        // v0.6.0: tokens are AES-wrapped via this.encrypt() before persisting so
+        // a user reading the Objects tab in Admin no longer sees plaintext.
+        await this.upsertState("info.access_token", this._encryptSecret(tokens.access_token));
+        await this.upsertState("info.refresh_token", this._encryptSecret(tokens.refresh_token));
         await this.upsertState("info.token_expires_at", expiresAt);
         // v0.5.4: diagnostics — both Blockly and VIS dashboards can branch on these.
         await this.setStateAsync("info.last_login_at", new Date().toISOString(), true);
@@ -926,8 +1058,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
             this.getStateAsync("info.refresh_token"),
             this.getStateAsync("info.token_expires_at"),
         ]);
-        const accessToken = typeof atState?.val === "string" ? atState.val : "";
-        const refreshToken = typeof rtState?.val === "string" ? rtState.val : "";
+        const accessToken = this._decryptSecret(atState?.val);
+        const refreshToken = this._decryptSecret(rtState?.val);
         const expiresAt = typeof expState?.val === "number" ? expState.val : 0;
         if (!accessToken || !refreshToken || !expiresAt) {
             return null;
@@ -1213,6 +1345,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
      *
      * @param proxy
      * @param session
+     * @param instance
      */
     _buildStreamUrl(proxy, session, instance = 1) {
         // v0.5.3: stream URL no longer embeds Digest credentials. The TLS
@@ -1243,8 +1376,11 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * one adapter start and pastes after a second restart.
      */
     async showLoginUrl() {
-        // Check if we already have a stored verifier (reuse across restarts)
-        const existingVerifier = (await this.getStateAsync("info.pkce_verifier"))?.val;
+        // Check if we already have a stored verifier (reuse across restarts).
+        // v0.6.0: verifier/state are AES-wrapped on disk; _decryptSecret also
+        // returns legacy plaintext from <=v0.5.x unchanged, so old installs
+        // still match before the next overwrite.
+        const existingVerifier = this._decryptSecret((await this.getStateAsync("info.pkce_verifier"))?.val);
         let verifier;
         let challenge;
         let state;
@@ -1253,7 +1389,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
             const { createHash, randomBytes } = await Promise.resolve().then(() => __importStar(require("node:crypto")));
             verifier = existingVerifier;
             challenge = createHash("sha256").update(verifier).digest("base64url");
-            const existingState = (await this.getStateAsync("info.pkce_state"))?.val;
+            const existingState = this._decryptSecret((await this.getStateAsync("info.pkce_state"))?.val);
             state =
                 existingState && existingState.length > 4
                     ? existingState
@@ -1266,8 +1402,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
             verifier = pair.verifier;
             challenge = pair.challenge;
             state = randomBytes(16).toString("base64url");
-            await this.setStateAsync("info.pkce_verifier", verifier, true);
-            await this.setStateAsync("info.pkce_state", state, true);
+            await this.setStateAsync("info.pkce_verifier", this._encryptSecret(verifier), true);
+            await this.setStateAsync("info.pkce_state", this._encryptSecret(state), true);
         }
         const authUrl = (0, auth_1.buildAuthUrl)(challenge, state);
         // v0.5.4: publish URL as a state so the Admin UI can render a clickable
@@ -1297,7 +1433,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
             throw new Error("No 'code' parameter found in pasted URL. " +
                 "Make sure to copy the full URL from the browser address bar after Bosch redirects you.");
         }
-        const verifier = (await this.getStateAsync("info.pkce_verifier"))?.val;
+        const verifier = this._decryptSecret((await this.getStateAsync("info.pkce_verifier"))?.val);
         if (!verifier || verifier.length < 10) {
             throw new Error("No PKCE verifier stored. " +
                 "Please restart the adapter first (without a redirect_url) to generate a login URL, " +
@@ -1343,6 +1479,9 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this.log.info("Bosch Smart Home Camera adapter starting…");
         // Ensure object tree for info/token states
         await this.ensureInfoObjects();
+        // v0.6.0: one-shot re-encrypt of any plaintext token/PKCE secret left
+        // behind by an upgrade from <=v0.5.x.
+        await this._migrateLegacySecrets();
         await this.setStateAsync("info.connection", false, true);
         // ── Step 1: Obtain tokens (PKCE browser flow) ──────────────────────
         let tokens;
@@ -1370,7 +1509,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
             // even though the refresh_token (offline_access, ~30 d) is still
             // valid.
             const rtState = await this.getStateAsync("info.refresh_token");
-            const storedRefreshToken = typeof rtState?.val === "string" ? rtState.val : "";
+            const storedRefreshToken = this._decryptSecret(rtState?.val);
             let refreshed = null;
             if (storedRefreshToken) {
                 try {
@@ -1498,7 +1637,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
             });
         }
         // ── Step 5: FCM push listener (real implementation v0.3.0) ──────────
-        this._fcmListener = new fcm_1.FcmListener(this._httpClient, tokens.access_token);
+        // v0.6.0: load previously persisted FCM credentials so the listener
+        // can skip the full ECDH/ACG/CBS handshake on every restart. Falls
+        // back to a fresh registration if the state is empty, the ciphertext
+        // is stale, or the JSON is malformed.
+        const savedFcmCreds = await this._loadSavedFcmCredentials();
+        this._fcmListener = new fcm_1.FcmListener(this._httpClient, tokens.access_token, {
+            savedCredentials: savedFcmCreds ?? undefined,
+        });
         // Silent push wake-up — Bosch sends no payload; fetch events from API
         this._fcmListener.on("push", () => {
             void this.fetchAndProcessEvents();
@@ -1513,10 +1659,16 @@ class BoschSmartHomeCamera extends utils.Adapter {
         this._fcmListener.on("person", (ev) => {
             void this.onFcmEvent(ev);
         });
-        // Registration success — log token prefix + mark healthy
+        // Registration success — log token prefix + persist creds + mark healthy
         this._fcmListener.on("registered", (creds) => {
             this.log.info(`FCM registered: ${creds.fcmToken.substring(0, 12)}...`);
             void this.setStateAsync("info.fcm_active", "healthy", true);
+            // v0.6.0: persist the raw credentials so the next adapter start
+            // can replay them as `savedCredentials` and avoid the full
+            // ECDH/ACG/CBS handshake (saves ~1 s and a CBS round-trip).
+            void this._saveFcmCredentials(creds).catch((err) => {
+                this.log.warn(`Could not persist FCM credentials: ${err instanceof Error ? err.message : String(err)}`);
+            });
         });
         // Per-mode failure diagnostic — emitted by FcmListener._tryStart on every
         // mode that fails to register. Without this log the user sees only the
@@ -1610,63 +1762,79 @@ class BoschSmartHomeCamera extends utils.Adapter {
             }
             throw err;
         }
-        for (const cam of cameras) {
-            // Refresh the in-memory metadata cache too (so generation/name stays
-            // current after a Bosch-app rename)
-            this._cameras.set(cam.id, cam);
-            if (cam.privacyMode !== undefined) {
-                const desired = cam.privacyMode === "ON";
-                // Only write when changed — upsertState already dedupes, but a
-                // log line per camera every 30 s would be noisy.
-                const current = await this.getStateAsync(`cameras.${cam.id}.privacy_enabled`);
-                if (current?.val !== desired) {
-                    await this.upsertState(`cameras.${cam.id}.privacy_enabled`, desired);
-                    this.log.debug(`State poll: ${cam.id.slice(0, 8)} privacy ` +
-                        `${current?.val ? "ON" : "OFF"} → ${desired ? "ON" : "OFF"} (from cloud)`);
-                }
-            }
-            // ── Gen2 lighting/switch — seed cache + sync wallwasher DPs ────────
-            // /lighting/switch is a separate endpoint (not in /v11/video_inputs),
-            // so we fetch it per-camera. Only Gen2 cams with featureSupport.light
-            // get this path — Gen1 has no RGB hardware.
-            if (cam.generation >= 2 && cam.featureLight === true) {
-                const ls = await (0, alarm_light_1.fetchLightingState)(this._httpClient, token, cam.id);
-                if (ls) {
-                    this._lightingCache.set(cam.id, ls);
-                    // Mirror wallwasher (top+bottom LED) into DPs. Use the
-                    // brighter of the two groups as the displayed brightness;
-                    // colour follows the top LED (they're driven together by
-                    // wallwasher writes anyway).
-                    const top = ls.topLedLightSettings;
-                    const bot = ls.bottomLedLightSettings;
-                    const brightness = Math.max(top.brightness, bot.brightness);
-                    const color = top.color ?? bot.color ?? "";
-                    const curBr = await this.getStateAsync(`cameras.${cam.id}.wallwasher_brightness`);
-                    if (curBr?.val !== brightness) {
-                        await this.upsertState(`cameras.${cam.id}.wallwasher_brightness`, brightness);
-                    }
-                    const curCol = await this.getStateAsync(`cameras.${cam.id}.wallwasher_color`);
-                    if (curCol?.val !== color) {
-                        await this.upsertState(`cameras.${cam.id}.wallwasher_color`, color);
-                    }
-                    // Derive the boolean on/off DPs from brightness so app-side
-                    // toggles propagate back to ioBroker. Without this, the
-                    // user saw stream + colour update but front_light_enabled /
-                    // wallwasher_enabled stayed frozen at the last
-                    // adapter-initiated value (forum #1339866).
-                    const frontOn = ls.frontLightSettings.brightness > 0;
-                    const wallOn = brightness > 0;
-                    const curFront = await this.getStateAsync(`cameras.${cam.id}.front_light_enabled`);
-                    if (curFront?.val !== frontOn) {
-                        await this.upsertState(`cameras.${cam.id}.front_light_enabled`, frontOn);
-                    }
-                    const curWall = await this.getStateAsync(`cameras.${cam.id}.wallwasher_enabled`);
-                    if (curWall?.val !== wallOn) {
-                        await this.upsertState(`cameras.${cam.id}.wallwasher_enabled`, wallOn);
-                    }
-                }
+        // v0.6.0: poll each camera in parallel. With 4 cameras the per-tick
+        // wall-time drops from ~N * 250 ms to ~250 ms because every camera
+        // owns its own DP namespace (`cameras.<id>.*`), so concurrent writes
+        // don't race.
+        await Promise.all(cameras.map((cam) => this._pollSingleCameraState(token, cam)));
+    }
+    /**
+     * Per-camera body of `_pollCameraStateOnce` (extracted for `Promise.all`).
+     *
+     * @param token
+     * @param cam
+     */
+    async _pollSingleCameraState(token, cam) {
+        // Refresh the in-memory metadata cache too (so generation/name stays
+        // current after a Bosch-app rename)
+        this._cameras.set(cam.id, cam);
+        if (cam.privacyMode !== undefined) {
+            const desired = cam.privacyMode === "ON";
+            // Only write when changed — upsertState already dedupes, but a
+            // log line per camera every 30 s would be noisy.
+            const current = await this.getStateAsync(`cameras.${cam.id}.privacy_enabled`);
+            if (current?.val !== desired) {
+                await this.upsertState(`cameras.${cam.id}.privacy_enabled`, desired);
+                this.log.debug(`State poll: ${cam.id.slice(0, 8)} privacy ` +
+                    `${current?.val ? "ON" : "OFF"} → ${desired ? "ON" : "OFF"} (from cloud)`);
             }
         }
+        // ── Gen2 lighting/switch — seed cache + sync wallwasher DPs ────────
+        // /lighting/switch is a separate endpoint (not in /v11/video_inputs),
+        // so we fetch it per-camera. Only Gen2 cams with featureSupport.light
+        // get this path — Gen1 has no RGB hardware.
+        if (cam.generation < 2 || cam.featureLight !== true) {
+            return;
+        }
+        const ls = await (0, alarm_light_1.fetchLightingState)(this._httpClient, token, cam.id);
+        if (!ls) {
+            return;
+        }
+        this._lightingCache.set(cam.id, ls);
+        // Mirror wallwasher (top+bottom LED) into DPs. Use the brighter of
+        // the two groups as the displayed brightness; colour follows the top
+        // LED (they're driven together by wallwasher writes anyway).
+        const top = ls.topLedLightSettings;
+        const bot = ls.bottomLedLightSettings;
+        const brightness = Math.max(top.brightness, bot.brightness);
+        const color = top.color ?? bot.color ?? "";
+        const frontOn = ls.frontLightSettings.brightness > 0;
+        const wallOn = brightness > 0;
+        // Batch the 4 getStateAsync reads instead of serialising them.
+        const [curBr, curCol, curFront, curWall] = await Promise.all([
+            this.getStateAsync(`cameras.${cam.id}.wallwasher_brightness`),
+            this.getStateAsync(`cameras.${cam.id}.wallwasher_color`),
+            this.getStateAsync(`cameras.${cam.id}.front_light_enabled`),
+            this.getStateAsync(`cameras.${cam.id}.wallwasher_enabled`),
+        ]);
+        const writes = [];
+        if (curBr?.val !== brightness) {
+            writes.push(this.upsertState(`cameras.${cam.id}.wallwasher_brightness`, brightness));
+        }
+        if (curCol?.val !== color) {
+            writes.push(this.upsertState(`cameras.${cam.id}.wallwasher_color`, color));
+        }
+        // Derive the boolean on/off DPs from brightness so app-side toggles
+        // propagate back to ioBroker. Without this, the user saw stream +
+        // colour update but front_light_enabled / wallwasher_enabled stayed
+        // frozen at the last adapter-initiated value (forum #1339866).
+        if (curFront?.val !== frontOn) {
+            writes.push(this.upsertState(`cameras.${cam.id}.front_light_enabled`, frontOn));
+        }
+        if (curWall?.val !== wallOn) {
+            writes.push(this.upsertState(`cameras.${cam.id}.wallwasher_enabled`, wallOn));
+        }
+        await Promise.all(writes);
     }
     /**
      * Called whenever a subscribed state changes.
@@ -1815,17 +1983,20 @@ class BoschSmartHomeCamera extends utils.Adapter {
         await this.setStateAsync(`cameras.${camId}.motion_active`, true, true);
         const previous = this._motionActiveTimers.get(camId);
         if (previous) {
-            clearTimeout(previous);
+            this.clearTimeout(previous);
         }
-        const clearTimer = setTimeout(() => {
+        // v0.6.0: use this.setTimeout so adapter-core auto-cancels on unload
+        // (the explicit clearTimeout in onUnload remains for graceful shutdown).
+        const clearTimer = this.setTimeout(() => {
             this._motionActiveTimers.delete(camId);
             void this.setStateAsync(`cameras.${camId}.motion_active`, false, true).catch((err) => {
                 this.log.debug(`motion_active auto-clear for ${camId.slice(0, 8)} threw: ` +
                     `${err instanceof Error ? err.message : String(err)}`);
             });
         }, BoschSmartHomeCamera.MOTION_ACTIVE_WINDOW_MS);
-        clearTimer.unref();
-        this._motionActiveTimers.set(camId, clearTimer);
+        if (clearTimer) {
+            this._motionActiveTimers.set(camId, clearTimer);
+        }
         // Optional: auto-snapshot — default true, opt-out via adapter config
         // (the field is `undefined` on legacy installs that never saw the
         // option, so treat `undefined` like `true`).
@@ -2004,25 +2175,29 @@ class BoschSmartHomeCamera extends utils.Adapter {
         // Cancel any previous pending teardown so the window slides on every snap
         const previous = this._snapshotIdleTimers.get(camId);
         if (previous) {
-            clearTimeout(previous);
+            this.clearTimeout(previous);
         }
-        const timer = setTimeout(() => {
+        // v0.6.0: use this.setTimeout so adapter-core auto-cancels on unload.
+        const timer = this.setTimeout(() => {
             this._snapshotIdleTimers.delete(camId);
             void this._teardownStream(camId).catch((err) => {
                 this.log.debug(`Idle teardown for ${camId.slice(0, 8)} threw: ` +
                     `${err instanceof Error ? err.message : String(err)}`);
             });
         }, BoschSmartHomeCamera.SNAPSHOT_SESSION_IDLE_MS);
-        // unref() so a dangling timer doesn't keep the Node event loop alive
-        // — important for mocha. Production: ioBroker holds the loop open.
-        timer.unref();
-        this._snapshotIdleTimers.set(camId, timer);
+        if (timer) {
+            this._snapshotIdleTimers.set(camId, timer);
+        }
     }
-    /** Cancel the pending idle-teardown timer for one camera, if any. */
+    /**
+     * Cancel the pending idle-teardown timer for one camera, if any.
+     *
+     * @param camId
+     */
     _cancelSnapshotIdleTeardown(camId) {
         const timer = this._snapshotIdleTimers.get(camId);
         if (timer) {
-            clearTimeout(timer);
+            this.clearTimeout(timer);
             this._snapshotIdleTimers.delete(camId);
         }
     }
@@ -2373,6 +2548,8 @@ class BoschSmartHomeCamera extends utils.Adapter {
      * HA integration's snap.jpg retry pattern.
      *
      * @param camId
+     * @param opts
+     * @param opts.asMotionEvent
      */
     async handleSnapshotTrigger(camId, opts = {}) {
         const session = await this.ensureLiveSession(camId);
@@ -2420,7 +2597,7 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 await this.setStateAsync(`cameras.${camId}.last_event_image_at`, new Date().toISOString(), true);
             }
             await this.markCameraReachability(camId, true);
-            this.log.info(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
+            this.log.debug(`Snapshot saved for camera ${camId.slice(0, 8)}: ${buf.length} bytes`);
         }
         finally {
             if (!livestreamOn) {
@@ -2554,14 +2731,14 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 // that fires during shutdown would try to close an
                 // already-closed session.
                 for (const [, timer] of this._snapshotIdleTimers) {
-                    clearTimeout(timer);
+                    this.clearTimeout(timer);
                 }
                 this._snapshotIdleTimers.clear();
                 // v0.5.3: cancel motion_active auto-clear timers so they
                 // don't fire after shutdown and try to write states on a
                 // dead adapter.
                 for (const [, timer] of this._motionActiveTimers) {
-                    clearTimeout(timer);
+                    this.clearTimeout(timer);
                 }
                 this._motionActiveTimers.clear();
                 // Stop all session watchdogs BEFORE stopping TLS proxies

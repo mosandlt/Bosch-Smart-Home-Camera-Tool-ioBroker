@@ -26,6 +26,11 @@ const digest_1 = require("./digest");
  */
 class SnapshotError extends Error {
     cause;
+    /**
+     *
+     * @param message
+     * @param cause
+     */
     constructor(message, cause) {
         super(message);
         this.name = "SnapshotError";

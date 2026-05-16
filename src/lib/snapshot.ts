@@ -25,6 +25,11 @@ import { digestRequest } from "./digest";
 export class SnapshotError extends Error {
     public readonly cause?: unknown;
 
+    /**
+     *
+     * @param message
+     * @param cause
+     */
     constructor(message: string, cause?: unknown) {
         super(message);
         this.name = "SnapshotError";

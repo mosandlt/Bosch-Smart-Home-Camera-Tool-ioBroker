@@ -153,6 +153,8 @@ export interface FcmListenerOptions {
 export class FcmCbsRegistrationError extends Error {
     /**
      *
+     * @param httpStatus
+     * @param message
      */
     constructor(
         public readonly httpStatus: number,
@@ -169,6 +171,8 @@ export class FcmCbsRegistrationError extends Error {
 export class FcmRegistrationError extends Error {
     /**
      *
+     * @param message
+     * @param cause
      */
     constructor(
         message: string,
@@ -260,6 +264,10 @@ export class FcmListener extends EventEmitter {
 
     /**
      *
+     * @param httpClient
+     * @param bearerToken
+     * @param options
+     * @param deps
      */
     constructor(
         httpClient: AxiosInstance,

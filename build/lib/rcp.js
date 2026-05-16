@@ -85,6 +85,8 @@ class RcpError extends Error {
     command;
     /**
      *
+     * @param code
+     * @param command
      */
     constructor(code, command) {
         super(`RCP error ${code} for command ${command}`);
@@ -101,6 +103,8 @@ class RcpNetworkError extends Error {
     status;
     /**
      *
+     * @param status
+     * @param message
      */
     constructor(status, message) {
         super(message);
