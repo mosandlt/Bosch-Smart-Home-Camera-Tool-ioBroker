@@ -176,8 +176,8 @@ What works:
 
 ```mermaid
 flowchart LR
-    Cam[Bosch Cameras<br/>Gen1 + Gen2<br/>HTTPS :443] -->|TLS tunnel| Proxy[Adapter TLS proxy<br/>127.0.0.1:&lt;port&gt;]
-    Cloud[Bosch CBS API<br/>residential.cbs<br/>.boschsecurity.com] -->|FCM push<br/>OAuth2 PKCE<br/>REST: events / video_inputs<br/>/ lighting / privacy| Adapter
+    Cam["Bosch Cameras<br/>Gen1 + Gen2<br/>HTTPS :443"] -->|TLS tunnel| Proxy["Adapter TLS proxy<br/>127.0.0.1:&lt;port&gt;"]
+    Cloud[Bosch CBS API<br/>residential.cbs<br/>.boschsecurity.com] -->|"FCM push<br/>OAuth2 PKCE<br/>REST: events / video_inputs<br/>/ lighting / privacy"| Adapter
     Adapter[ioBroker Adapter<br/>Node.js] --> DPs[(Encrypted DPs<br/>encryptedNative)]
     Proxy --> Adapter
     DPs --> VIS[VIS / VIS-2<br/>Dashboard]
@@ -248,7 +248,7 @@ HLS for low-latency live video instead of the default snapshot refresh.
 flowchart TD
     Cam[Camera detects motion<br/>or audio alarm] -->|FCM push<br/>MTalk/MCS| L[Adapter FCM listener<br/>_aracna/fcm_]
     L -->|persistent_id dedup| F{fetchEvents<br/>GET /v11/events}
-    F -->|new event| N[normalize event:<br/>id, type, tags, timestamp]
+    F -->|new event| N["normalize event:<br/>id, type, tags, timestamp"]
     N --> C{eventTags / type}
     C -->|MOVEMENT + PERSON| EP[last_event_type=person<br/>motion_active=true 90s]
     C -->|MOVEMENT| EM[last_event_type=movement<br/>motion_active=true 90s]
@@ -280,10 +280,10 @@ via go2rtc → WebRTC/HLS.
 
 ```mermaid
 flowchart LR
-    Cam[Bosch Camera<br/>192.168.x.y:443<br/>HTTPS only] -->|RTSP-over-TLS<br/>tunneled| Proxy[Adapter TLS proxy<br/>port: per-camera<br/>bind: 127.0.0.1 or LAN]
-    Proxy -->|rtsp://user:pwd@<br/>host:&lt;port&gt;/rtsp_tunnel<br/>?inst=1&enableaudio=1| B[BlueIris]
-    Proxy -->|rtsp://...?inst=1| F[Frigate]
-    Proxy -->|rtsp://...?inst=2 sub| ICam[iobroker.cameras]
+    Cam["Bosch Camera<br/>192.168.x.y:443<br/>HTTPS only"] -->|RTSP-over-TLS<br/>tunneled| Proxy["Adapter TLS proxy<br/>port: per-camera<br/>bind: 127.0.0.1 or LAN"]
+    Proxy -->|"rtsp://user:pwd@<br/>host:&lt;port&gt;/rtsp_tunnel<br/>?inst=1&enableaudio=1"| B[BlueIris]
+    Proxy -->|"rtsp://...?inst=1"| F[Frigate]
+    Proxy -->|"rtsp://...?inst=2 sub"| ICam[iobroker.cameras]
     Cloud[Bosch CBS API] -.->|hourly session renew<br/>~60s before timeout| Proxy
 ```
 
