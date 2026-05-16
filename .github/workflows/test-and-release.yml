@@ -47,8 +47,11 @@ jobs:
           # gated by BOSCH_LIVE_TEST=1 and is not in the repo.
           integration-test-command: 'echo "integration tests skipped — unit suite covers all production code"'
 
-  # Publishes to npm when a tag is pushed. Uses NPM_TOKEN secret as fallback path
-  # (trusted publishing requires npm account setup — see iobroker.example notes).
+  # Publishes to npm on tag push via npm Trusted Publishing (OIDC).
+  # No NPM_TOKEN secret is used — the npmjs.com package is configured with
+  # a Trusted Publisher pointing at this repo + workflow, and the deploy
+  # action exchanges the GitHub OIDC token for a short-lived publish token
+  # at runtime. id-token: write is required for that exchange.
   deploy:
     needs: [check-and-lint, adapter-tests]
     if: |
@@ -63,5 +66,4 @@ jobs:
       - uses: ioBroker/testing-action-deploy@v1
         with:
           node-version: '20.x'
-          npm-token: ${{ secrets.NPM_TOKEN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}

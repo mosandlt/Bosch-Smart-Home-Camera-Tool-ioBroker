@@ -73,6 +73,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **ioBroker VIS dashboard** | n/a | n/a | ✅ via `snapshot_path` + `stream_url` |
 | **Cloud-relay REMOTE fallback** | ✅ auto-switch when LAN unreachable | ✅ remote mode | ❌ *(LOCAL-only by design)* |
 | **Browser-based admin / config UI** | ✅ HA Config Flow | n/a (CLI) | ✅ JSON-config tabs |
+| **UI languages** | DE · EN · FR · NL · IT · ES | EN only (CLI output) | EN · DE · FR · ES · IT · NL · PL · PT · RU · UK · ZH-CN |
 
 **Legend:** ✅ supported · ❌ not supported / not planned · n/a not applicable for this platform.
 
@@ -83,7 +84,13 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 
 ## Changelog
 
-### v0.5.4 (beta)
+### 0.5.5 (2026-05-16)
+Two forum-driven bugfixes reported against v0.5.4 on the ioBroker forum (post #1339866).
+
+- **`motion_active` now flips on the FCM-polling-fallback path** (`info.fcm_active="polling"`). The shared post-event helper (`_onMotionFired()`, introduced in v0.5.3) was only being called by the real FCM event handler and the synthetic motion trigger — not by `fetchAndProcessEvents()`, the `/v11/events` polling loop the adapter runs when FCM registration fails. Affected users saw `last_motion_at` update correctly on every motion / person / audio_alarm event while `motion_active` stayed permanently `false`, breaking Blockly automations that listened for the rising edge. The polling path now calls the same helper, so the 90 s auto-clear timer and the auto-snapshot side-effects fire identically on both push and pull.
+- **Light state now syncs back from the Bosch app**. The 30 s state poll (added in v0.5.1 for `privacy_enabled` sync) already fetched `/lighting/switch` on every tick for Gen2 cameras with `featureSupport.light=true` — but only wrote the brightness and colour into `wallwasher_brightness` / `wallwasher_color`. The boolean on/off DPs (`front_light_enabled`, `wallwasher_enabled`) were never derived from the response, so app-side light toggles stayed invisible to ioBroker until the next adapter restart. The poll now derives `front_light_enabled` from `frontLightSettings.brightness > 0` and `wallwasher_enabled` from `max(topLed, bottomLed) brightness > 0`, so app toggles propagate within ~30 s. No new HTTP call; the data was already on the wire. Gen1 cameras (Eyes Outdoor, 360°) are unchanged — `/lighting_override` is not polled today, so app-side toggles on Gen1 still wait for the next adapter restart.
+
+### 0.5.4 (2026-05-15)
 Login UX overhaul plus three small quality fixes the live-test surfaced.
 
 - **One-click Bosch login button** in the instance settings (Forum #84538 feedback). The browser-OAuth URL is now also published as the `info.login_url` datapoint and rendered as a clickable link in the Admin UI — no more fishing the 300-char URL out of the log inspector. The new **Open Bosch Login in browser** button opens the URL directly in a new tab via the adapter's `getLoginUrl` sendTo handler. Once login succeeds, both the link and the button hide themselves.
@@ -95,7 +102,7 @@ Login UX overhaul plus three small quality fixes the live-test surfaced.
 - **`last_motion_at` is now valid ISO 8601**: Bosch sends timestamps in Java's `ZonedDateTime#toString` format (`2026-05-15T06:51:47.604+02:00[Europe/Berlin]`). The trailing `[zone-id]` broke `new Date()`. The adapter now strips it so Blockly scripts and VIS widgets can parse the field with standard tooling. Note: existing automations reading the raw string will see one less trailing token; numeric comparisons via `new Date(…).getTime()` start working from this release.
 - **Snapshot keep-alive documentation honesty**: the v0.5.3 release notes claimed *~200 ms* warm-burst latency. Live measurements on Gen2 Eyes Outdoor II showed 2–5 s typical, occasionally 10–15 s — the camera's own snapshot endpoint dominates the round-trip, not the Bosch session-open. The wall-clock saving from the cached session is ~0.5–1 s (the avoided `PUT /v11/.../connection`). Updated wording in this release.
 
-### v0.5.3 (beta)
+### 0.5.3 (2026-05-14)
 Five forum-driven improvements — focused on the BlueIris / NVR-recorder integration story.
 
 - **RTSP-aware proxy with transparent Digest auth (fixes forum #84538 BlueIris Error 8000007a)**: the TLS proxy now speaks RTSP and handles the Bosch Digest auth dance itself. Clients (BlueIris, iobroker.cameras, Frigate, …) connect to a clean `rtsp://host:port/rtsp_tunnel?inst=1&…` URL — **no credentials in the URL anymore**. The proxy parses the first 401 challenge from the camera, computes the response, swallows the 401, and injects an `Authorization: Digest …` header on every subsequent client request. Back-compat: clients that already send their own `Authorization` header (legacy in-URL creds path, VLC after a 401) are byte-piped through unchanged. Jaschkopf no longer needs to enter Digest credentials in BlueIris's own fields.
@@ -104,7 +111,7 @@ Five forum-driven improvements — focused on the BlueIris / NVR-recorder integr
 - **`cameras.<id>.last_event_image`** + **Auto-snapshot on motion**: every FCM motion / person / audio_alarm event now fetches a fresh JPEG and writes it as a `data:image/jpeg;base64,…` string to `last_event_image` (plus matching `last_event_image_at` timestamp). Ready for Telegram / Signal / Matrix push automations without scripting. Toggle in new admin tab **Events / Notifications** (`auto_snapshot_on_motion`, default ON).
 - **`cameras.<id>.stream_url_sub`** (new, experimental): sub-stream URL via `inst=2` alongside the main `inst=1` `stream_url`. Same Bosch session, same TLS proxy, zero extra quota cost. Lets BlueIris record the main stream while displaying the lower-bitrate substream for CPU savings. Depends on the camera firmware actually serving `inst=2` (Gen2 Eyes typically does; Gen1 may not).
 
-### v0.5.2 (beta)
+### 0.5.2 (2026-05-14)
 Per-camera livestream switch — default OFF.
 
 - **`cameras.<id>.livestream_enabled`** (new, boolean, writable, default `false`): explicit on/off switch for the continuous RTSP livestream. Previous behaviour opened a 24/7 Bosch LOCAL session + TLS proxy + RTSP watchdog on every adapter start — one open session per camera, consuming the daily LOCAL session quota even when nobody was watching the stream. Streaming is now opt-in:
@@ -113,7 +120,7 @@ Per-camera livestream switch — default OFF.
 - **Snapshots remain unaffected**: every `snapshot_trigger` (and the one-per-camera startup snapshot that probes the `online` state) still opens a session, fetches the JPEG, and then — when `livestream_enabled` is `false` — closes the session right after so no proxy or watchdog stays running.
 - **BlueIris recipe (forum #84538 post 14)**: VLC accepts `rtsp://user:pass@host/...` directly, BlueIris does not. To consume the stream in BlueIris, paste just `rtsp://<host>:<port>/rtsp_tunnel?…` into the address field (strip the `user:pass@` part), enter the Digest username and password in BlueIris's separate **Username / Password** fields, and set **RTSP Authentication = Digest**. Error code `8000007a (CheckPort/User/Password)` typically means BlueIris failed to apply the in-URL credentials — entering them in the dedicated fields resolves it.
 
-### v0.5.1 (beta)
+### 0.5.1 (2026-05-14)
 Adds Gen2 siren + RGB wallwasher colour, plus the v0.5.0 forum-driven fixes:
 
 - **Siren** (Gen2 only): new `cameras.<id>.siren_active` boolean DP. Write `true` to trigger the integrated 75 dB siren (panic alarm), `false` to silence. Backed by `PUT /v11/video_inputs/{id}/panic_alarm` with `{status: "ON"|"OFF"}` — the same endpoint the official Bosch app uses.
@@ -124,13 +131,13 @@ Adds Gen2 siren + RGB wallwasher colour, plus the v0.5.0 forum-driven fixes:
 - New admin tab "RTSP / Stream": tickbox to bind the proxy to `0.0.0.0` (instead of `127.0.0.1`) plus an external-host field so the published URL uses the ioBroker host's LAN IP — required when BlueIris / Frigate runs on a separate machine.
 - Motion trigger DP description clarified: `motion_trigger` is for ioBroker-side automations only; it updates `last_motion_at` but does **not** make the Bosch app create a recording.
 
-### v0.4.0
+### 0.4.0 (2026-05-13)
 - Light-datapoint split: `front_light_enabled` + `wallwasher_enabled` can now be controlled independently (e.g. a dusk sensor drives the wallwasher only, without touching the front spotlight)
 - Synthetic motion trigger: write `true` to `cameras.<id>.motion_trigger` (select event type via `motion_trigger_event_type`) to inject a motion/person/audio_alarm event from an external sensor (e.g. Philips Hue in the driveway) so automations fire immediately without waiting for the Bosch FCM push
 - RTSP session watchdog: LOCAL Bosch sessions renew automatically ~60 s before `maxSessionDuration` expires — BlueIris and similar 24/7 recorders no longer see an hourly stream drop
 - Cloud-relay media paths fully removed: adapter enforces LOCAL-only for all media (RTSP + snapshots); if the camera is unreachable on the LAN a clear error is logged — no silent fallback to `proxy-NN.live.cbs.boschsecurity.com:42090`
 
-### v0.3.3
+### 0.3.3 (2026-05-13)
 FCM resilience + token refresh on startup. Single Bosch OSS Firebase API key, per-mode failure surfacing, auto-snapshot at start, polling fallback.
 
 ## Status
@@ -276,10 +283,17 @@ npm run release major    # 0.3.0 → 1.0.0
 3. Auto-generates a news entry from commits since the last release
 4. Creates the `vX.Y.Z` tag and pushes — GitHub Actions auto-publishes to npm
 
-## Related repos
+## Related Projects
 
-- HA Integration: [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) (v12.0.1, Quality Scale Platinum)
-- Python CLI: [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) (v10.2.1)
+This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
+
+| Implementation | Repo | Status |
+|---|---|---|
+| 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.3.1 · HA Quality Scale **Platinum** · production-ready |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
+| 🟢 **ioBroker Adapter** (this repo) | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.5.5 · beta · npm |
+
+HA stays the **reference implementation** — features land there first; the Python CLI and this adapter catch up over time.
 
 ## Changelog
 

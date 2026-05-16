@@ -1,4 +1,5 @@
 {
+  "i18n": true,
   "type": "tabs",
   "items": {
     "tab_connection": {
@@ -7,19 +8,13 @@
       "items": {
         "_info_step1": {
           "type": "header",
-          "text": {
-            "en": "Step 1: Open the Bosch login URL in your browser",
-            "de": "Schritt 1: Bosch-Login-URL im Browser öffnen"
-          },
+          "text": "Step 1: Open the Bosch login URL in your browser",
           "size": 5,
           "sm": 12
         },
         "_login_instructions": {
           "type": "staticText",
-          "text": {
-            "en": "Open Objects → bosch-smart-home-camera.0 → info → login_url and click the value to launch the Bosch login. Log in with your Bosch account (captcha / MFA), then Bosch redirects your browser to https://www.bosch.com/boschcam?code=XXX&state=YYY — copy that full URL from the address bar and paste it below.",
-            "de": "Öffne Objekte → bosch-smart-home-camera.0 → info → login_url und klicke auf den Wert, um den Bosch-Login zu starten. Mit dem Bosch-Konto einloggen (Captcha/MFA), anschließend leitet Bosch zu https://www.bosch.com/boschcam?code=XXX&state=YYY weiter — diese vollständige URL aus der Adressleiste kopieren und unten einfügen."
-          },
+          "text": "Open Objects → bosch-smart-home-camera.0 → info → login_url and click the value to launch the Bosch login. Log in with your Bosch account (captcha / MFA), then Bosch redirects your browser to https://www.bosch.com/boschcam?code=XXX&state=YYY — copy that full URL from the address bar and paste it below.",
           "newLine": true,
           "xs": 12,
           "sm": 12,
@@ -30,10 +25,7 @@
         "_login_button": {
           "type": "sendTo",
           "command": "getLoginUrl",
-          "label": {
-            "en": "Open Bosch Login in browser",
-            "de": "Bosch-Login im Browser öffnen"
-          },
+          "label": "Open Bosch Login in browser",
           "openUrl": true,
           "variant": "contained",
           "color": "primary",
@@ -48,11 +40,9 @@
         "_login_url_state": {
           "type": "state",
           "oid": "info.login_url",
-          "label": {
-            "en": "Bosch login URL (manual fallback)",
-            "de": "Bosch Login-URL (manueller Fallback)"
-          },
-          "controlType": "text",
+          "label": "Bosch login URL (manual fallback)",
+          "control": "text",
+          "readOnly": true,
           "newLine": true,
           "xs": 12,
           "sm": 12,
@@ -63,28 +53,13 @@
         "_reset_login_button": {
           "type": "sendTo",
           "command": "resetLogin",
-          "label": {
-            "en": "Reset login (clear tokens & restart)",
-            "de": "Login zurücksetzen (Token löschen & neu starten)"
-          },
+          "label": "Reset login (clear tokens & restart)",
           "confirm": {
             "condition": "true",
-            "text": {
-              "en": "This clears all Bosch tokens and restarts the adapter. You will need to log in again. Continue?",
-              "de": "Hiermit werden alle Bosch-Token gelöscht und der Adapter neu gestartet. Ein erneuter Login ist nötig. Fortfahren?"
-            },
-            "title": {
-              "en": "Reset login?",
-              "de": "Login zurücksetzen?"
-            },
-            "ok": {
-              "en": "Reset",
-              "de": "Zurücksetzen"
-            },
-            "cancel": {
-              "en": "Cancel",
-              "de": "Abbrechen"
-            }
+            "text": "This clears all Bosch tokens and restarts the adapter. You will need to log in again. Continue?",
+            "title": "Reset login?",
+            "ok": "Reset",
+            "cancel": "Cancel"
           },
           "variant": "outlined",
           "color": "secondary",
@@ -98,24 +73,15 @@
         },
         "_info_step2": {
           "type": "header",
-          "text": {
-            "en": "Step 2: Paste the redirect URL",
-            "de": "Schritt 2: Redirect-URL einfügen"
-          },
+          "text": "Step 2: Paste the redirect URL",
           "size": 5,
           "newLine": true,
           "sm": 12
         },
         "redirect_url": {
           "type": "text",
-          "label": {
-            "en": "Pasted callback URL (https://www.bosch.com/boschcam?code=...)",
-            "de": "Eingefügte Callback-URL (https://www.bosch.com/boschcam?code=...)"
-          },
-          "help": {
-            "en": "Paste the full URL from the browser address bar after Bosch redirects you. Leave empty if you haven't logged in yet — the adapter will log the login URL on startup.",
-            "de": "Vollständige URL aus der Browser-Adressleiste nach der Bosch-Weiterleitung einfügen. Leer lassen, wenn noch kein Login erfolgt ist — der Adapter gibt die Login-URL beim Start im Log aus."
-          },
+          "label": "Pasted callback URL (https://www.bosch.com/boschcam?code=...)",
+          "help": "Paste the full URL from the browser address bar after Bosch redirects you. Leave empty if you haven't logged in yet — the adapter will log the login URL on startup.",
           "newLine": true,
           "xs": 12,
           "sm": 12,
@@ -126,14 +92,8 @@
         },
         "region": {
           "type": "select",
-          "label": {
-            "en": "Region",
-            "de": "Region"
-          },
-          "help": {
-            "en": "Bosch cloud region (EU for Europe)",
-            "de": "Bosch-Cloud-Region (EU für Europa)"
-          },
+          "label": "Region",
+          "help": "Bosch cloud region (EU for Europe)",
           "default": "EU",
           "options": [
             { "label": "Europe (EU)", "value": "EU" },
@@ -150,26 +110,17 @@
     },
     "tab_rtsp": {
       "type": "panel",
-      "label": {
-        "en": "RTSP / Stream",
-        "de": "RTSP / Stream"
-      },
+      "label": "RTSP / Stream",
       "items": {
         "_info_rtsp": {
           "type": "header",
-          "text": {
-            "en": "External recorder integration (BlueIris, Frigate, …)",
-            "de": "Externer Recorder (BlueIris, Frigate, …)"
-          },
+          "text": "External recorder integration (BlueIris, Frigate, …)",
           "size": 5,
           "sm": 12
         },
         "_rtsp_help": {
           "type": "staticText",
-          "text": {
-            "en": "By default the per-camera RTSP proxy listens on 127.0.0.1 only — reachable from the ioBroker host itself (cameras adapter, FFmpeg, go2rtc). Enable LAN exposure to let a recorder on a different host pull the stream. The published cameras.<id>.stream_url already carries Digest credentials, so the URL works as-is once pasted into the recorder.",
-            "de": "Standardmäßig hört der RTSP-Proxy nur auf 127.0.0.1 — erreichbar vom ioBroker-Host (cameras-Adapter, FFmpeg, go2rtc). LAN-Exposition aktivieren, damit ein Recorder auf einem anderen Host den Stream ziehen kann. Die veröffentlichte cameras.<id>.stream_url enthält bereits Digest-Credentials, die URL funktioniert nach dem Einfügen direkt im Recorder."
-          },
+          "text": "By default the per-camera RTSP proxy listens on 127.0.0.1 only — reachable from the ioBroker host itself (cameras adapter, FFmpeg, go2rtc). Enable LAN exposure to let a recorder on a different host pull the stream. The published cameras.<id>.stream_url already carries Digest credentials, so the URL works as-is once pasted into the recorder.",
           "newLine": true,
           "xs": 12,
           "sm": 12,
@@ -179,14 +130,8 @@
         },
         "rtsp_expose_to_lan": {
           "type": "checkbox",
-          "label": {
-            "en": "Expose RTSP proxy to LAN",
-            "de": "RTSP-Proxy ins LAN freigeben"
-          },
-          "help": {
-            "en": "Bind the proxy to 0.0.0.0 (all interfaces) instead of 127.0.0.1. Required for BlueIris / Frigate on a separate host.",
-            "de": "Proxy an 0.0.0.0 (alle Interfaces) binden statt 127.0.0.1. Erforderlich für BlueIris / Frigate auf einem anderen Host."
-          },
+          "label": "Expose RTSP proxy to LAN",
+          "help": "Bind the proxy to 0.0.0.0 (all interfaces) instead of 127.0.0.1. Required for BlueIris / Frigate on a separate host.",
           "default": false,
           "newLine": true,
           "xs": 12,
@@ -197,14 +142,8 @@
         },
         "rtsp_external_host": {
           "type": "text",
-          "label": {
-            "en": "External hostname / LAN IP",
-            "de": "Externer Hostname / LAN-IP"
-          },
-          "help": {
-            "en": "Hostname or IP the recorder should use to reach the proxy, e.g. \"192.168.1.50\". Used in the published stream_url. Leave empty to keep 127.0.0.1.",
-            "de": "Hostname oder IP, mit der der Recorder den Proxy erreicht, z. B. \"192.168.1.50\". Wird in stream_url eingetragen. Leer = 127.0.0.1."
-          },
+          "label": "External hostname / LAN IP",
+          "help": "Hostname or IP the recorder should use to reach the proxy, e.g. \"192.168.1.50\". Used in the published stream_url. Leave empty to keep 127.0.0.1.",
           "default": "",
           "trim": true,
           "newLine": true,
@@ -219,26 +158,17 @@
     },
     "tab_events": {
       "type": "panel",
-      "label": {
-        "en": "Events / Notifications",
-        "de": "Events / Benachrichtigungen"
-      },
+      "label": "Events / Notifications",
       "items": {
         "_info_events": {
           "type": "header",
-          "text": {
-            "en": "Motion-triggered snapshot refresh",
-            "de": "Snapshot-Aktualisierung bei Bewegung"
-          },
+          "text": "Motion-triggered snapshot refresh",
           "size": 5,
           "sm": 12
         },
         "_events_help": {
           "type": "staticText",
-          "text": {
-            "en": "When the camera reports a motion / person / audio_alarm event (via FCM push or polling fallback), automatically fetch a fresh snapshot and write a base64-encoded copy into cameras.<id>.last_event_image. Perfect for Telegram / Signal / Matrix push notifications: your automation reads last_event_image and forwards the JPEG directly, no separate snapshot_trigger needed. Bursts (continuous motion) reuse the warm Bosch session so quota stays low.",
-            "de": "Wenn die Kamera ein Motion- / Person- / Audio-Alarm-Event meldet (per FCM-Push oder Polling-Fallback), wird automatisch ein frisches Snapshot abgerufen und eine Base64-kodierte Kopie in cameras.<id>.last_event_image geschrieben. Ideal für Telegram- / Signal- / Matrix-Pushnachrichten: die Automation liest last_event_image und schickt das JPEG direkt weiter, ohne extra snapshot_trigger. Bei Burst-Events (anhaltende Bewegung) wird die warme Bosch-Session weiterverwendet, Quota bleibt niedrig."
-          },
+          "text": "When the camera reports a motion / person / audio_alarm event (via FCM push or polling fallback), automatically fetch a fresh snapshot and write a base64-encoded copy into cameras.<id>.last_event_image. Perfect for Telegram / Signal / Matrix push notifications: your automation reads last_event_image and forwards the JPEG directly, no separate snapshot_trigger needed. Bursts (continuous motion) reuse the warm Bosch session so quota stays low.",
           "newLine": true,
           "xs": 12,
           "sm": 12,
@@ -248,14 +178,8 @@
         },
         "auto_snapshot_on_motion": {
           "type": "checkbox",
-          "label": {
-            "en": "Auto-snapshot on motion event",
-            "de": "Snapshot automatisch bei Bewegungs-Event"
-          },
-          "help": {
-            "en": "Fetches a fresh JPEG on every motion / person / audio_alarm event and updates both cameras.<id>.snapshot_path (file store) and cameras.<id>.last_event_image (base64 string).",
-            "de": "Holt bei jedem Motion- / Person- / Audio-Event ein frisches JPEG und aktualisiert sowohl cameras.<id>.snapshot_path (File-Store) als auch cameras.<id>.last_event_image (Base64-String)."
-          },
+          "label": "Auto-snapshot on motion event",
+          "help": "Fetches a fresh JPEG on every motion / person / audio_alarm event and updates both cameras.<id>.snapshot_path (file store) and cameras.<id>.last_event_image (base64 string).",
           "default": true,
           "newLine": true,
           "xs": 12,

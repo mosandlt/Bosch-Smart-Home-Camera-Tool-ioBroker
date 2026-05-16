@@ -2,8 +2,11 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    # Random monthly slot — spreads load across the dependabot fleet
+    # instead of every adapter firing on the 1st at 00:00 UTC.
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "17 4 5 * *"
     open-pull-requests-limit: 10
     versioning-strategy: increase
     # Cooldown reduces supply-chain risk by delaying brand-new releases.
@@ -14,7 +17,8 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "43 6 19 * *"
     cooldown:
       default-days: 7
     labels:

@@ -1859,6 +1859,26 @@ class BoschSmartHomeCamera extends utils.Adapter {
                     if (curCol?.val !== color) {
                         await this.upsertState(`cameras.${cam.id}.wallwasher_color`, color);
                     }
+
+                    // Derive the boolean on/off DPs from brightness so app-side
+                    // toggles propagate back to ioBroker. Without this, the
+                    // user saw stream + colour update but front_light_enabled /
+                    // wallwasher_enabled stayed frozen at the last
+                    // adapter-initiated value (forum #1339866).
+                    const frontOn = ls.frontLightSettings.brightness > 0;
+                    const wallOn = brightness > 0;
+                    const curFront = await this.getStateAsync(
+                        `cameras.${cam.id}.front_light_enabled`,
+                    );
+                    if (curFront?.val !== frontOn) {
+                        await this.upsertState(`cameras.${cam.id}.front_light_enabled`, frontOn);
+                    }
+                    const curWall = await this.getStateAsync(
+                        `cameras.${cam.id}.wallwasher_enabled`,
+                    );
+                    if (curWall?.val !== wallOn) {
+                        await this.upsertState(`cameras.${cam.id}.wallwasher_enabled`, wallOn);
+                    }
                 }
             }
         }
@@ -2445,6 +2465,13 @@ class BoschSmartHomeCamera extends utils.Adapter {
                 this.log.info(
                     `Motion event [${eventType}] for camera ${camId.slice(0, 8)} at ${ts} (id=${newestId.slice(0, 8)})`,
                 );
+
+                // Same side-effects as the FCM path: flip motion_active=true,
+                // arm the 90 s auto-clear timer, and optionally fire an
+                // auto-snapshot. Without this call, users on the polling
+                // fallback (info.fcm_active="polling") saw last_motion_at
+                // update but motion_active stuck at false (forum #1339866).
+                await this._onMotionFired(camId);
             } catch (err: unknown) {
                 this.log.debug(
                     `fetchAndProcessEvents failed for ${camId.slice(0, 8)}: ${(err as Error).message}`,

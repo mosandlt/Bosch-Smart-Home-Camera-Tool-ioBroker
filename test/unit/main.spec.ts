@@ -1574,6 +1574,201 @@ describe("main adapter — v0.2.0 command handlers", () => {
         ).to.equal(true);
     });
 
+    // ── Regression: forum post 1339866 (Jaschkopf, v0.5.4) ──────────────────
+    //
+    // Bug 1 — motion_active stays false when FCM is unavailable.
+    //   _onMotionFired() (which flips motion_active=true and arms the 90 s
+    //   auto-clear) is invoked by the FCM event handler and the synthetic
+    //   trigger, but NOT by the polling-fallback path fetchAndProcessEvents().
+    //   Users on info.fcm_active="polling" therefore see last_motion_at
+    //   update on every event while motion_active stays permanently false.
+    //
+    // Bug 2 — light state DPs don't follow Bosch-app toggles.
+    //   The 30 s state poll fetches /lighting/switch and writes brightness +
+    //   colour DPs, but never derives the boolean front_light_enabled /
+    //   wallwasher_enabled from the brightness values. So when the user
+    //   toggles the light in the Bosch app, ioBroker reports the old state.
+
+    it("polling fallback: fetchAndProcessEvents flips motion_active (forum #1339866 bug 1)", async () => {
+        // Fresh event arriving on the polling fallback — newer ID than the
+        // empty cache, so the dedup check is bypassed.
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const eventBody = [
+            {
+                id: "event-9999",
+                eventType: "MOVEMENT",
+                eventTags: ["PERSON"],
+                timestamp: "2026-05-15T19:00:00.000Z",
+                videoInputId: camId,
+            },
+        ];
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            extraAxiosResponses: [{ status: 200, data: eventBody }],
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        // Drive the polling path directly — this is what runs in
+        // info.fcm_active="polling" mode for users whose FCM registration
+        // failed.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any).fetchAndProcessEvents();
+
+        const lastAt = db.getState(
+            `${adapter.namespace}.cameras.${camId}.last_motion_at`,
+        ) as ioBroker.State | undefined;
+        expect(
+            lastAt?.val,
+            "precondition: polling path writes last_motion_at (already worked in v0.5.4)",
+        ).to.equal("2026-05-15T19:00:00.000Z");
+
+        const motionActive = db.getState(
+            `${adapter.namespace}.cameras.${camId}.motion_active`,
+        ) as ioBroker.State | undefined;
+        expect(
+            motionActive?.val,
+            "motion_active must flip on polling-fallback events too (forum #1339866)",
+        ).to.equal(true);
+
+        // Auto-clear timer must be armed by the polling path as well
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const timers = (adapter as any)._motionActiveTimers as Map<string, unknown>;
+        expect(timers.has(camId), "motion_active auto-clear timer armed by polling").to.equal(
+            true,
+        );
+    });
+
+    it("state poll derives front_light_enabled + wallwasher_enabled from brightness (forum #1339866 bug 2)", async () => {
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        // The state poll re-calls fetchCameras then fetchLightingState. Both
+        // need feature flags so the Gen2 lighting block is taken.
+        const cameraListResponse = [
+            {
+                id: camId,
+                title: "Terrasse",
+                hardwareVersion: "HOME_Eyes_Outdoor",
+                firmwareVersion: "9.40.25",
+                privacyMode: "OFF",
+                featureSupport: { light: true },
+            },
+        ];
+        // Lighting state: front spotlight ON (brightness 80), wallwasher ON
+        // via top LED only (50/0). Both booleans must be derived as true.
+        const lightingResponse = {
+            frontLightSettings: { brightness: 80, color: null, whiteBalance: 0.0 },
+            topLedLightSettings: { brightness: 50, color: "#ff8800", whiteBalance: null },
+            bottomLedLightSettings: { brightness: 0, color: null, whiteBalance: 0.0 },
+        };
+
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            extraAxiosResponses: [
+                { status: 200, data: cameraListResponse }, // GET /v11/video_inputs (re-poll)
+                { status: 200, data: lightingResponse }, // GET /v11/video_inputs/{id}/lighting/switch
+            ],
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        // Seed DPs to the OPPOSITE state so the poll's sync is observable.
+        // (User toggled the light in the Bosch app — adapter DPs are stale.)
+        db.publishState(`${adapter.namespace}.cameras.${camId}.front_light_enabled`, {
+            val: false,
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.cameras.${camId}.wallwasher_enabled`, {
+            val: false,
+            ack: true,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any)._pollCameraStateOnce();
+
+        const front = db.getState(
+            `${adapter.namespace}.cameras.${camId}.front_light_enabled`,
+        ) as ioBroker.State | undefined;
+        expect(
+            front?.val,
+            "front_light_enabled must follow frontLightSettings.brightness>0 (forum #1339866)",
+        ).to.equal(true);
+
+        const wall = db.getState(
+            `${adapter.namespace}.cameras.${camId}.wallwasher_enabled`,
+        ) as ioBroker.State | undefined;
+        expect(
+            wall?.val,
+            "wallwasher_enabled must follow max(top, bottom) brightness>0 (forum #1339866)",
+        ).to.equal(true);
+    });
+
+    it("state poll clears front_light_enabled + wallwasher_enabled when both groups are off", async () => {
+        const camId = "EF791764-A48D-4F00-9B32-EF04BEB0DDA0";
+        const cameraListResponse = [
+            {
+                id: camId,
+                title: "Terrasse",
+                hardwareVersion: "HOME_Eyes_Outdoor",
+                firmwareVersion: "9.40.25",
+                privacyMode: "OFF",
+                featureSupport: { light: true },
+            },
+        ];
+        // All three LED groups OFF — user turned the lights off in the app
+        // while ioBroker still thinks they're on.
+        const lightingResponse = {
+            frontLightSettings: { brightness: 0, color: null, whiteBalance: 0.0 },
+            topLedLightSettings: { brightness: 0, color: null, whiteBalance: 0.0 },
+            bottomLedLightSettings: { brightness: 0, color: null, whiteBalance: 0.0 },
+        };
+
+        const { db, adapter } = createAdapterWithMocks({
+            fetchSnapshot: sinon.stub().resolves(Buffer.from([0xff, 0xd8, 0xff, 0xe0])),
+            extraAxiosResponses: [
+                { status: 200, data: cameraListResponse },
+                { status: 200, data: lightingResponse },
+            ],
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const writeFileStub = (adapter as any).writeFileAsync as sinon.SinonStub;
+        if (writeFileStub?.resolves) writeFileStub.resolves(undefined);
+
+        await adapter.readyHandler!();
+        await flushAutoSnapshot();
+
+        db.publishState(`${adapter.namespace}.cameras.${camId}.front_light_enabled`, {
+            val: true,
+            ack: true,
+        });
+        db.publishState(`${adapter.namespace}.cameras.${camId}.wallwasher_enabled`, {
+            val: true,
+            ack: true,
+        });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (adapter as any)._pollCameraStateOnce();
+
+        const front = db.getState(
+            `${adapter.namespace}.cameras.${camId}.front_light_enabled`,
+        ) as ioBroker.State | undefined;
+        expect(front?.val, "front_light_enabled must clear when brightness=0").to.equal(false);
+
+        const wall = db.getState(
+            `${adapter.namespace}.cameras.${camId}.wallwasher_enabled`,
+        ) as ioBroker.State | undefined;
+        expect(wall?.val, "wallwasher_enabled must clear when both groups brightness=0").to.equal(
+            false,
+        );
+    });
+
     // ── v0.5.3: dual stream URL (inst=2 sub-stream alongside inst=1 main) ──
 
     it("livestream ON publishes both stream_url (inst=1) and stream_url_sub (inst=2)", async () => {
