@@ -316,17 +316,36 @@ describe("TLS Proxy (src/lib/tls_proxy.ts)", function () {
         });
         handles.push(handle);
 
-        // Attempt a connection — it should fail gracefully
-        await new Promise<void>((resolve) => {
-            const sock = net.createConnection({ host: "127.0.0.1", port: handle.port });
-            sock.on("close", () => resolve());
-            sock.on("error", () => resolve());
-            // Timeout safety
-            setTimeout(() => {
-                sock.destroy();
-                resolve();
-            }, 3000);
-        });
+        // Attempt a connection — it should fail gracefully. Wait specifically
+        // for the WARN log line that signals "remote unreachable" rather than
+        // racing on the client's `close` event (which can fire BEFORE the
+        // teardown() callback under CI load — observed flake 2026-05-16).
+        const sock = net.createConnection({ host: "127.0.0.1", port: handle.port });
+        sock.on("error", () => undefined);  // swallow client-side errors
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const start = Date.now();
+                const poll = setInterval(() => {
+                    if (logEntries.some((e) => e.level === "warn" || e.level === "error")) {
+                        clearInterval(poll);
+                        clearTimeout(deadline);
+                        resolve();
+                    } else if (Date.now() - start > 9_500) {
+                        // poll interval guard — let the deadline timer reject
+                    }
+                }, 50);
+                const deadline = setTimeout(() => {
+                    clearInterval(poll);
+                    reject(new Error(
+                        `No warn/error log entry within 10s. ` +
+                        `Captured ${logEntries.length} entries: ` +
+                        JSON.stringify(logEntries.map((e) => `${e.level}:${e.message.slice(0, 60)}`)),
+                    ));
+                }, 10_000);
+            });
+        } finally {
+            sock.destroy();
+        }
 
         // A warning should have been logged
         const warnEntries = logEntries.filter((e) => e.level === "warn" || e.level === "error");
