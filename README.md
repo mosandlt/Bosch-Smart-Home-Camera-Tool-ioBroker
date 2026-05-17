@@ -45,7 +45,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 
 | Feature | [Home Assistant Integration](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | [Python CLI Tool](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | [ioBroker Adapter](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) |
 |---|---|---|---|
-| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.2+ stable | v0.6+ beta |
+| **Maturity** | v12+ — HA Quality Scale **Platinum** | v10.7+ stable | v0.6+ beta |
 | **Platform** | Home Assistant (HACS) | Standalone Python 3.10+ CLI | ioBroker (npm) |
 | **Login** | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) | OAuth2 PKCE (browser) |
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |
@@ -362,8 +362,9 @@ This adapter is part of a 3-implementation family for Bosch Smart Home Cameras:
 | Implementation | Repo | Status |
 |---|---|---|
 | 🏆 Home Assistant Integration | [Bosch-Smart-Home-Camera-Tool-HomeAssistant](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-HomeAssistant) | v12.4.2 · HA Quality Scale **Platinum** · production-ready |
-| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.2.1 · capture / research / no-HA standalone |
+| 🐍 Python CLI | [Bosch-Smart-Home-Camera-Tool-Python](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-Python) | v10.7.0 · Mini-NVR + SMB upload (BETA) · capture / research / no-HA standalone |
 | 🟢 **ioBroker Adapter** (this repo) | [ioBroker.bosch-smart-home-camera](https://github.com/mosandlt/ioBroker.bosch-smart-home-camera) | v0.6.0 · beta · npm |
+| 🤖 MCP Server | [Bosch-Smart-Home-Camera-Tool-MCP](https://github.com/mosandlt/Bosch-Smart-Home-Camera-Tool-MCP) | v1.0.0 · Claude Code / Claude Desktop integration |
 
 HA stays the **reference implementation** — features land there first; the Python CLI and this adapter catch up over time.
 
