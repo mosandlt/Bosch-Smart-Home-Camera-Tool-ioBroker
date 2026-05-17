@@ -51,7 +51,7 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **Snapshots** | ✅ Native `Camera.image` | ✅ `snapshot` command | ✅ File-store + base64 DP |
 | **Live RTSP stream (LAN)** | ✅ via HA Stream component | ✅ ffmpeg/RTSPS output | ✅ TLS proxy → local RTSP |
 | **WebRTC (sub-second latency)** | ✅ via integrated go2rtc | ❌ | ❌ |
-| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ❌ | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
+| **Dual-stream URL (main + sub)** | ✅ `sensor.bosch_<n>_stream_url` + `_sub` *(v12.4.0, opt-in per cam)* | ✅ `info` shows both · `live --sub` *(v10.5.0)* | ✅ `stream_url` + `stream_url_sub` *(v0.5.3 experimental)* |
 | **External recorder (BlueIris, Frigate)** | ✅ via go2rtc | ✅ stdout pipe | ✅ Digest-creds URL + LAN bind option |
 | **Privacy mode** | ✅ switch entity | ✅ command | ✅ DP |
 | **Front spotlight (Gen1/Gen2)** | ✅ light entity | ✅ command | ✅ DP |
