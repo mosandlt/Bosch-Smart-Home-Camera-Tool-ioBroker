@@ -63,8 +63,8 @@ The Bosch Smart Home Camera reverse-engineered API is exposed via three sibling 
 | **Auto-snapshot on motion** | ✅ refreshes Camera entity | n/a | ✅ writes `last_event_image` base64 *(v0.5.3)* |
 | **Synthetic motion trigger (external sensor)** | ✅ service | n/a | ✅ DP |
 | **Cloud clip download (history ~30 d)** | ✅ via Media Browser | ✅ download command | ❌ *(parked — no community request yet)* |
-| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ❌ | ❌ |
-| **SMB / NAS clip upload** | ✅ | ❌ | ❌ |
+| **Mini-NVR (motion-triggered local recording)** | ✅ *(v11.2.0 BETA)* | ✅ *(v10.7.0 BETA)* | ❌ |
+| **SMB / NAS clip upload** | ✅ | ✅ *(v10.7.0 BETA)* | ❌ |
 | **Audio-alarm sensitivity (Gen2)** | ✅ select | ✅ command | ❌ |
 | **Camera sharing (friends)** | ❌ | ✅ command | ❌ |
 | **Pan / tilt (360° Gen1)** | ✅ services | ✅ command | ❌ |
